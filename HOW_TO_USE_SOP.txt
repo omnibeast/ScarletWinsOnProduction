@@ -1,0 +1,245 @@
+# 📖 Admin SOP - How to Use These Documents
+
+## Available Formats
+
+I've created your Admin Standard Operating Procedures in **3 formats**:
+
+### 1️⃣ **SOP.md** (Markdown Format)
+- **File:** `SOP.md`
+- **Best For:** Reading in code editors, GitHub, or any markdown viewer
+- **How to Use:**
+  - Open in VS Code
+  - View on GitHub
+  - Convert to PDF using any markdown converter
+
+### 2️⃣ **sop.html** (HTML Format - Styled & Print-Ready)
+- **File:** `sop.html`
+- **Best For:** Browser viewing, professional printing
+- **How to Use:**
+  1. Double-click `sop.html` to open in your default browser
+  2. Press `Ctrl+P` to print
+  3. Choose "Save as PDF" option
+  4. Save as `sop.pdf`
+
+### 3️⃣ **sop.pdf** (PDF Format)
+- **File:** `sop.pdf` (will be created after you print from HTML)
+- **Best For:** Distribution, sharing with team, portable viewing
+
+---
+
+## 📋 SOP Contents Quick Reference
+
+### Section 1: Introduction & Overview
+- System purpose and key features
+- Admin requirements and access
+
+### Section 2: System Architecture
+- Polling mode explanation
+- Single-file deployment model
+- Persistence and data structure
+
+### Section 3: Admin Topics & Data Structure
+- Complete list of 10 forum topics
+- Format specifications for each topic
+- Data structure explanations
+
+### Section 4: User Workflows
+- User registration flow
+- Main menu options
+- Load balance & cashout flows (single-message design)
+
+### Section 5: Admin Commands (MOST IMPORTANT)
+- **`/promo` Command:** Broadcast promotions to all users
+  - How to send in PROMOTIONS topic
+  - Usage examples
+  
+- **`/msguser` Command:** Send DMs to specific users
+  - How to send in ADMIN_USER_MSGS topic
+  - Find user IDs
+  - Error handling
+
+### Section 6: Game Management
+- Creating games (default + custom)
+- Changing game status (Enable/Disable/Archive)
+- Game format reference
+
+### Section 7: Approval Workflows
+- Load balance approval process
+- Cashout approval process
+- How to reject with reason
+- Request ID tracking
+
+### Section 8: Inventory Management
+- Adding accounts to inventory
+- FIFO assignment process
+- Account format reference
+- Checking inventory status
+
+### Section 9: Payment Configuration
+- Setting up payment QR per game
+- Updating QR codes
+- Supported formats (photo/document)
+
+### Section 10: System Monitoring & Maintenance
+- System health monitoring
+- Automatic backups & recovery
+- Email validation
+- User blocking handling
+
+---
+
+## 🚀 Quick Start for New Admins
+
+### Day 1 Tasks:
+1. Read **Section 3** (Admin Topics & Data Structure)
+2. Read **Section 5** (Admin Commands)
+3. Read **Section 6** (Game Management)
+
+### Getting Set Up:
+1. **Create Games:** Go to MANAGE_GAMES topic → Post game records
+2. **Add Accounts:** Go to ACCOUNT_INVENTORY topic → Post account records
+3. **Set Payment QRs:** Go to PAYMENT_CONFIG topic → Upload QR images
+
+### Daily Tasks:
+1. Check LOAD_APPROVALS for pending requests → Approve/Reject
+2. Check WITHDRAW_APPROVALS for pending requests → Approve/Reject
+3. Review TRANSACTION_LOGS for activity
+4. Monitor ACCOUNT_INVENTORY levels
+
+---
+
+## 🎯 Most Important Commands to Remember
+
+### Command 1: Broadcasting Promotions
+```
+Location: PROMOTIONS topic
+Command: /promo
+Text: Your promotion message
+Result: Broadcast to all known users
+```
+
+### Command 2: Send User DMs
+```
+Location: ADMIN_USER_MSGS topic
+Command: /msguser USER_ID Message text
+Result: Direct message sent to user
+```
+
+### Command 3: Create Game
+```
+Location: MANAGE_GAMES topic
+Format: GAME | id=GameX | name=Game Name | status=ACTIVE
+Result: New game available to users
+```
+
+### Command 4: Add Account
+```
+Location: ACCOUNT_INVENTORY topic
+Format: ACCOUNT | game=GameX | username=user | password=pass | status=AVAILABLE
+Result: Account ready for FIFO assignment
+```
+
+---
+
+## 📊 Topic Matrix (For Quick Reference)
+
+| Topic | Topic ID | Purpose | Action | Admin Can Edit? |
+|-------|----------|---------|--------|-----------------|
+| MANAGE_GAMES | 20 | Game config | Post/Click controls | YES (via buttons) |
+| ACCOUNT_INVENTORY | 4 | Account list | Post accounts | YES (via post) |
+| LOAD_APPROVALS | 6 | Load requests | Approve/Reject | YES (buttons + reason) |
+| WITHDRAW_APPROVALS | 8 | Cashout requests | Approve/Reject | YES (buttons + reason) |
+| TRANSACTION_LOGS | 10 | Audit trail | VIEW ONLY | NO (automated logs) |
+| EMAIL_LOGS | 12 | Email history | VIEW ONLY | NO (automated logs) |
+| PROMOTIONS | 2 | Promotions | /promo command | YES (command) |
+| PAYMENT_CONFIG | 57 | Payment QRs | Upload QR | YES (upload new) |
+| ADMIN_USER_MSGS | 59 | Message logs | /msguser command | YES (command) |
+| SYSTEM_BACKUPS | 92 | State backups | VIEW ONLY | NO (automated) |
+
+---
+
+## ❓ Common Questions
+
+### Q: Where do I go to approve load requests?
+**A:** LOAD_APPROVALS topic. You'll see payment screenshots with ✅ Approve / ❌ Reject buttons.
+
+### Q: How do I find a user's ID?
+**A:** It appears in approval request messages in LOAD_APPROVALS or WITHDRAW_APPROVALS topics.
+
+### Q: What happens if I reject a request?
+**A:** Bot asks for your rejection reason in the same topic. Type the reason, and it's sent to the user.
+
+### Q: Can I delete messages?
+**A:** NO. Never delete messages. They're part of the audit trail. Only edit if explicitly stated.
+
+### Q: How do I know if the bot is running?
+**A:** Check SYSTEM_BACKUPS topic. Should see a pinned message with recent timestamp. Also check server console logs.
+
+### Q: What if I run out of accounts?
+**A:** Go to ACCOUNT_INVENTORY topic and add more with the ACCOUNT format.
+
+### Q: Can users see the admin topics?
+**A:** NO. Only admins in the supergroup can see these topics. Users only see their private chat with the bot.
+
+---
+
+## 🔄 How to Convert to PDF
+
+### Option 1: Using Browser (Recommended)
+1. Open `sop.html` in any web browser
+2. Press `Ctrl+P` (or Cmd+P on Mac)
+3. Choose "Save as PDF"
+4. Save as `sop.pdf`
+5. Done! You now have a professional PDF
+
+### Option 2: Using Online Converter
+1. Upload `sop.html` to https://cloudconvert.com/html-to-pdf
+2. Download the resulting `sop.pdf`
+
+### Option 3: Using Command Line (If you have wkhtmltopdf installed)
+```bash
+wkhtmltopdf d:\Prj\ScarletWins\sop.html d:\Prj\ScarletWins\sop.pdf
+```
+
+---
+
+## 📝 Document Structure
+
+- **Total Sections:** 10 + Quick Reference + Troubleshooting + Best Practices + Glossary
+- **Topics Covered:** Game Management, Account Inventory, Approvals, Monitoring
+- **Admin Commands:** 2 main commands (/promo, /msguser)
+- **Data Formats:** All exact message formats documented
+- **Audit Trail:** Complete logging in TRANSACTION_LOGS
+
+---
+
+## ✅ Checklist for Setup
+
+- [ ] I've read Section 3 (Admin Topics)
+- [ ] I've read Section 5 (Admin Commands)
+- [ ] I've created all games in MANAGE_GAMES
+- [ ] I've added accounts in ACCOUNT_INVENTORY
+- [ ] I've uploaded payment QRs in PAYMENT_CONFIG
+- [ ] I understand Load/Cashout approval flows
+- [ ] I know how to use /promo command
+- [ ] I know how to use /msguser command
+- [ ] I understand FIFO assignment process
+- [ ] I know which topics are read-only (LOGS & BACKUPS)
+
+---
+
+## 📞 When You Need Help
+
+1. **Bot not responding?** → Check SYSTEM_BACKUPS for recent timestamp
+2. **User can't register?** → Check ACCOUNT_INVENTORY has AVAILABLE accounts
+3. **Approval messages missing?** → Verify bot is admin in supergroup
+4. **Payment QR not showing?** → Check PAYMENT_CONFIG has QR for that game
+5. **Command not working?** → Verify you're in the correct topic
+
+---
+
+**SOP Version:** 1.0  
+**Last Updated:** January 31, 2026  
+**Status:** Production Ready  
+
+All 3 formats are identical in content. Choose the one you're most comfortable with!

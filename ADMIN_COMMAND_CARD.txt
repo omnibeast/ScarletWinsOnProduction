@@ -1,0 +1,326 @@
+╔════════════════════════════════════════════════════════════════════════════╗
+║                  TELEGRAM GAME BOT - ADMIN COMMAND CARD                      ║
+║                          Quick Reference Guide                               ║
+╚════════════════════════════════════════════════════════════════════════════╝
+
+┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
+┃ COMMAND 1: /promo - BROADCAST PROMOTION TO ALL USERS                     ┃
+┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛
+
+📍 LOCATION:  PROMOTIONS topic (Topic ID: 2)
+👥 ACCESS:    Administrators only
+⏰ FREQUENCY: As needed (use sparingly)
+
+USAGE EXAMPLES:
+
+  ✓ /promo Hello users! Game A is now LIVE!
+  
+  ✓ /promo Check out our new features and promotions!
+
+STEP-BY-STEP:
+  1. Go to PROMOTIONS topic in admin supergroup
+  2. Type: /promo <your_message>
+  3. Press Enter
+  4. Bot broadcasts to ALL known users
+  5. Results logged with delivery count
+
+OUTPUT:
+  ✅ Message sent to X users
+  ⚠️  Blocked/Failed: Y users
+  📝 Full log in PROMOTIONS topic
+
+
+┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
+┃ COMMAND 2: /msguser - SEND DM TO SPECIFIC USER                           ┃
+┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛
+
+📍 LOCATION:  ADMIN_USER_MSGS topic (Topic ID: 59)
+👥 ACCESS:    Administrators only
+⏰ FREQUENCY: As needed
+
+USAGE EXAMPLES:
+
+  ✓ /msguser 123456789 Your account has been approved!
+  
+  ✓ /msguser 987654321 Please contact support for assistance.
+
+HOW TO GET USER ID:
+  → Check LOAD_APPROVALS or WITHDRAW_APPROVALS messages
+  → Look in TRANSACTION_LOGS for past user IDs
+  → It's a 9-10 digit number
+
+STEP-BY-STEP:
+  1. Go to ADMIN_USER_MSGS topic in admin supergroup
+  2. Type: /msguser <USER_ID> <message_text>
+  3. Press Enter
+  4. Bot sends message to user in private chat
+  5. Result logged (SENT or FAILED)
+
+OUTPUT:
+  ✅ Message sent to user 123456789
+  ❌ Failed to send (user blocked or doesn't exist)
+  📝 Log entry in ADMIN_USER_MSGS topic
+
+
+┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
+┃ FORMAT 1: CREATE/UPDATE GAME                                             ┃
+┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛
+
+📍 LOCATION:  MANAGE_GAMES topic (Topic ID: 20)
+👥 ACCESS:    Post as admin (bot handles)
+🎮 ACTION:    Click Enable/Disable/Archive buttons
+
+FORMAT:
+  GAME | id=GAMEID | name=Game Name | status=STATUS
+
+FIELDS:
+  • id:     Unique game ID (no spaces, e.g., "GameA", "Game_Premium")
+  • name:   Display name for users (e.g., "Game A", "Premium Edition")
+  • status: One of → ACTIVE | DISABLED | ARCHIVED
+
+EXAMPLES:
+
+  ✓ GAME | id=GameA | name=Game A | status=ACTIVE
+  
+  ✓ GAME | id=GamePremium | name=Premium Edition | status=ACTIVE
+  
+  ✓ GAME | id=GameOld | name=Game Old | status=ARCHIVED
+
+LIFECYCLE:
+  ACTIVE   → Users can see & register
+  DISABLED → Hidden from users, no new registrations
+  ARCHIVED → Permanently hidden but kept for records
+
+
+┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
+┃ FORMAT 2: ADD GAME ACCOUNT TO INVENTORY                                  ┃
+┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛
+
+📍 LOCATION:  ACCOUNT_INVENTORY topic (Topic ID: 4)
+👥 ACCESS:    Post as admin (bot handles FIFO queue)
+🔐 LIFECYCLE: AVAILABLE → ASSIGNED (when user registers)
+
+FORMAT:
+  ACCOUNT | game=GAMEID | username=USERNAME | password=PASSWORD | status=AVAILABLE
+
+FIELDS:
+  • game:     Game ID (must match existing game)
+  • username: Account login username
+  • password: Account login password
+  • status:   AVAILABLE (bot changes to ASSIGNED after registration)
+
+EXAMPLES:
+
+  ✓ ACCOUNT | game=GameA | username=user001 | password=pass123 | status=AVAILABLE
+  
+  ✓ ACCOUNT | game=GamePremium | username=premium_user | password=SecurePass! | status=AVAILABLE
+
+BULK ADD TIP:
+  Add multiple accounts at once:
+  
+  ACCOUNT | game=GameA | username=user002 | password=pass456 | status=AVAILABLE
+  ACCOUNT | game=GameA | username=user003 | password=pass789 | status=AVAILABLE
+  ACCOUNT | game=GameA | username=user004 | password=pass012 | status=AVAILABLE
+
+STATUS LIFECYCLE:
+  AVAILABLE → Ready for user registration (FIFO queue)
+  ASSIGNED  → Bot auto-updates after user registers
+  Shows: assigned_to=USER_ID | assigned_at=TIMESTAMP
+
+
+┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
+┃ FORMAT 3: SET PAYMENT QR FOR GAME                                        ┃
+┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛
+
+📍 LOCATION:  PAYMENT_CONFIG topic (Topic ID: 57)
+👥 ACCESS:    Upload photo/document with caption
+⚡ REQUIREMENT: Must be set BEFORE making game ACTIVE
+
+FORMAT (Caption/Text):
+  PAYMENT_QR | game=GAMEID
+
+STEPS:
+  1. Go to PAYMENT_CONFIG topic
+  2. Upload photo (QR code image) OR document (PDF with QR)
+  3. Add caption: PAYMENT_QR | game=GameA
+  4. Bot stores and displays to users during Load flow
+
+EXAMPLE CAPTION:
+  PAYMENT_QR | game=GameA
+  PAYMENT_QR | game=GamePremium
+
+SUPPORTED FILE TYPES:
+  📷 Photo:    PNG, JPG, JPEG (displayed inline)
+  📄 Document: PDF, PNG (downloadable)
+
+⚠️  IMPORTANT:
+  • Users cannot load balance if payment QR not configured
+  • Set QR BEFORE making game ACTIVE
+  • To update: Upload new file with same caption
+  • Bot auto-replaces old QR
+
+
+┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
+┃ APPROVAL WORKFLOW: LOAD BALANCE                                          ┃
+┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛
+
+📍 LOCATION:  LOAD_APPROVALS topic (Topic ID: 6)
+📸 CONTENT:   Payment screenshot + user info
+⏳ STATUS:    PENDING → APPROVED or REJECTED
+
+STEP 1: USER SUBMITS LOAD REQUEST
+  ├─ User fills username, amount in private chat
+  ├─ User uploads payment screenshot
+  └─ Bot sends screenshot to LOAD_APPROVALS with buttons
+
+STEP 2: ADMIN REVIEWS
+  ├─ See: Payment photo
+  ├─ See: Username, amount, user ID, request ID
+  └─ See: Two buttons (✅ Approve / ❌ Reject)
+
+STEP 3: ADMIN APPROVES ✅
+  ├─ Click ✅ Approve button
+  ├─ Bot logs approval in TRANSACTION_LOGS
+  ├─ Bot edits user's private message to show "APPROVED"
+  └─ Buttons removed from approval request
+
+STEP 3 ALT: ADMIN REJECTS ❌
+  ├─ Click ❌ Reject button
+  ├─ Bot asks: "Enter rejection reason"
+  ├─ Admin sends reason message in same topic
+  ├─ Bot logs rejection with reason
+  ├─ Bot edits user's message to show "REJECTED" + reason
+  └─ Buttons removed
+
+⚠️  IMPORTANT:
+  • ONE message per user (edited throughout flow)
+  • User sees live updates in their private chat
+  • Rejection reason required
+  • All logged in TRANSACTION_LOGS
+
+
+┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
+┃ APPROVAL WORKFLOW: CASHOUT                                               ┃
+┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛
+
+📍 LOCATION:  WITHDRAW_APPROVALS topic (Topic ID: 8)
+📸 CONTENT:   Receiving QR + user info
+⏳ STATUS:    PENDING → APPROVED or REJECTED
+
+STEP 1: USER SUBMITS CASHOUT REQUEST
+  ├─ User fills username, amount, cashtag in private chat
+  ├─ User uploads receiving QR (photo or document)
+  └─ Bot sends QR to WITHDRAW_APPROVALS with buttons
+
+STEP 2: ADMIN REVIEWS
+  ├─ See: Receiving QR image/document
+  ├─ See: Username, amount, cashtag, user ID, request ID
+  └─ See: Two buttons (✅ Approve / ❌ Reject)
+
+STEP 3: ADMIN APPROVES ✅
+  ├─ Click ✅ Approve button
+  ├─ Bot logs approval in TRANSACTION_LOGS
+  ├─ Bot edits user's private message to show "APPROVED"
+  └─ Buttons removed
+
+STEP 3 ALT: ADMIN REJECTS ❌
+  ├─ Click ❌ Reject button
+  ├─ Bot asks: "Enter rejection reason"
+  ├─ Admin sends reason message in same topic
+  ├─ Bot logs rejection with reason
+  ├─ Bot edits user's message to show "REJECTED" + reason
+  └─ Buttons removed
+
+⚠️  IMPORTANT:
+  • ONE message per user (edited throughout flow)
+  • Receiving QR must be photo or document
+  • Reason required for rejection
+  • All logged in TRANSACTION_LOGS
+
+
+┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
+┃ DAILY ADMIN CHECKLIST                                                    ┃
+┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛
+
+☐ Check LOAD_APPROVALS for pending requests
+  └─ Approve or reject each request
+  └─ Provide reasons for rejections
+
+☐ Check WITHDRAW_APPROVALS for pending cashout requests
+  └─ Approve or reject each request
+  └─ Provide reasons for rejections
+
+☐ Review TRANSACTION_LOGS for unusual activity
+  └─ Look for patterns
+  └─ Check timestamps
+
+☐ Monitor ACCOUNT_INVENTORY levels
+  └─ If low on AVAILABLE accounts, add more
+  └─ Check per-game availability
+
+☐ Verify SYSTEM_BACKUPS pinned message
+  └─ Should have recent timestamp
+  └─ Confirms bot is running and saving state
+
+
+┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
+┃ TOPICS AT A GLANCE                                                       ┃
+┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛
+
+┌─ OPERATIONAL TOPICS (Admin Action Required) ─────────────────────────────┐
+│                                                                            │
+│ 🎮 MANAGE_GAMES (ID: 20)                                                  │
+│    → Create/modify games, click Enable/Disable/Archive buttons           │
+│    → Format: GAME | id=X | name=Y | status=Z                             │
+│                                                                            │
+│ 📦 ACCOUNT_INVENTORY (ID: 4)                                              │
+│    → Add accounts by posting formatted messages                           │
+│    → Bot auto-updates status from AVAILABLE → ASSIGNED                    │
+│    → Format: ACCOUNT | game=X | username=Y | password=Z | status=AVAILABLE
+│                                                                            │
+│ 🟦 LOAD_APPROVALS (ID: 6)                                                 │
+│    → Review payment screenshots                                           │
+│    → Click ✅ Approve or ❌ Reject buttons                                │
+│    → Provide reason if rejecting                                          │
+│                                                                            │
+│ 🟩 WITHDRAW_APPROVALS (ID: 8)                                             │
+│    → Review receiving QRs                                                 │
+│    → Click ✅ Approve or ❌ Reject buttons                                │
+│    → Provide reason if rejecting                                          │
+│                                                                            │
+│ 💳 PAYMENT_CONFIG (ID: 57)                                                │
+│    → Upload payment QR images/documents                                   │
+│    → Caption: PAYMENT_QR | game=X                                         │
+│                                                                            │
+│ 📣 PROMOTIONS (ID: 2)                                                     │
+│    → Use /promo command to broadcast to all users                         │
+│                                                                            │
+│ ✉️ ADMIN_USER_MSGS (ID: 59)                                               │
+│    → Use /msguser command to send DMs to users                            │
+│                                                                            │
+└─────────────────────────────────────────────────────────────────────────┘
+
+┌─ MONITORING TOPICS (View Only) ──────────────────────────────────────────┐
+│                                                                            │
+│ 🧾 TRANSACTION_LOGS (ID: 10)                                              │
+│    → View complete audit trail of all operations                          │
+│    → Search for specific user IDs or request IDs                          │
+│    → Do NOT edit or delete messages                                       │
+│                                                                            │
+│ 📧 EMAIL_LOGS (ID: 12)                                                    │
+│    → View when users provide email addresses                              │
+│    → Monitor for unusual activity                                         │
+│    → Do NOT edit or delete messages                                       │
+│                                                                            │
+│ 💾 SYSTEM_BACKUPS (ID: 92)                                                │
+│    → View state snapshots (automatic, every 15 minutes)                   │
+│    → Pinned message = latest backup                                       │
+│    → Do NOT edit or delete messages                                       │
+│                                                                            │
+└─────────────────────────────────────────────────────────────────────────┘
+
+
+╔════════════════════════════════════════════════════════════════════════════╗
+║  Print this card and post it near your workspace for quick reference!      ║
+║  For complete details, see: SOP.md or sop.html                             ║
+╚════════════════════════════════════════════════════════════════════════════╝
