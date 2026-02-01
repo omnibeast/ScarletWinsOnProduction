@@ -1832,6 +1832,26 @@ bot.on("message", async (msg) => {
           const cap = formatTicketCaption(ticket);
           await safeEditText(ADMIN_GROUP_ID, ai.ticket_message_id, cap, buildAdminTicketKeyboard(ai.ticket_id));
           await bot.sendMessage(msg.from.id, `Reply posted to ticket ${ai.ticket_id}.`);
+
+          // Notify ticket owner via DM (if possible) with a Reply button
+          try {
+            const userNotify = [
+              `💬 Reply for your ticket <b>${ai.ticket_id}</b>`,
+              "",
+              `<b>Admin:</b> ${adminIdentity(msg.from)}`,
+              "",
+              `<b>Message:</b>`,
+              `${replyText}`,
+            ].join("\n");
+            await withRetry(() =>
+              bot.sendMessage(ticket.user_id, userNotify, {
+                parse_mode: "HTML",
+                reply_markup: { inline_keyboard: [[{ text: "↩ Reply", callback_data: cb(["U", "TICKET", "REPLY", ai.ticket_id]) }]] },
+              }),
+            );
+          } catch (e) {
+            // ignore if user cannot be messaged
+          }
           await writeSnapshot();
           return;
         }
@@ -1914,6 +1934,32 @@ bot.on("message", async (msg) => {
           }
 
           return;
+        }
+
+        if (flow.kind === "TICKET_CONV") {
+          if (flow.step === "WAIT_USER_REPLY") {
+            if (!msg.text) {
+              await bot.sendMessage(uid, "Please send your reply as text.");
+              return;
+            }
+            const reply = msg.text.trim();
+            const ticket = supportTickets.get(flow.ticket_id);
+            if (!ticket) {
+              await bot.sendMessage(uid, "Ticket not found.");
+              userFlows.delete(uid);
+              return;
+            }
+            const userInfo = knownUsers.get(uid);
+            const by = userInfo?.username ? `@${userInfo.username}` : userInfo?.first_name || `User ${uid}`;
+            ticket.replies.push({ by, text: reply, timestamp: isoNow() });
+            supportTickets.set(flow.ticket_id, ticket);
+            const cap = formatTicketCaption(ticket);
+            await safeEditText(ADMIN_GROUP_ID, ticket.message_thread_id, cap, buildAdminTicketKeyboard(flow.ticket_id));
+            await bot.sendMessage(uid, `Your reply was posted to ticket ${flow.ticket_id}.`);
+            userFlows.delete(uid);
+            await writeSnapshot();
+            return;
+          }
         }
 
         if (flow.kind === "CASHOUT") {
@@ -2279,6 +2325,39 @@ bot.on("callback_query", async (q) => {
           return;
         }
 
+        if (action === "SUPPORT") {
+          await startSupportFlow(userId);
+          return;
+        }
+
+
+      if (parts[1] === "TICKET") {
+        const action = parts[2];
+        const ticketId = parts[3];
+        if (action === "REPLY") {
+          await answerCb(q.id, "Replying…");
+          const ticket = supportTickets.get(ticketId);
+          if (!ticket) {
+            await answerCbAlert(q.id, "Ticket not found.");
+            return;
+          }
+          // Prompt user in this private chat to enter reply
+          try {
+            await safeEditText(q.message.chat.id, q.message.message_id, `💬 Reply to ticket <b>${ticketId}</b>\n\nEnter your reply message:`, buildFlowNavKeyboard("TICKET"));
+          } catch (e) {
+            // ignore
+          }
+          userFlows.set(userId, {
+            kind: "TICKET_CONV",
+            chat_id: q.message.chat.id,
+            message_id: q.message.message_id,
+            step: "WAIT_USER_REPLY",
+            ticket_id: ticketId,
+            started_at: isoNow(),
+          });
+          return;
+        }
+      }
         if (action === "SUPPORT") {
           await startSupportFlow(userId);
           return;
