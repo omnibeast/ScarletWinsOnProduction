@@ -853,31 +853,42 @@ ACCOUNT | game=GAMEID | username=USERNAME | password=PASSWORD | status=STATUS
         <!-- SECTION 9 -->
         <h2>9️⃣ Payment Configuration</h2>
         <div class="section">
-            <h3>Setting Up Payment QR Codes</h3>
-            <p>Payment QR codes are configured per game in the PAYMENT_CONFIG topic:</p>
+            <h3>Setting Up Payment QR Codes (Per Method)</h3>
+            <p>Payment QR codes are configured per game and per payment method in the <strong>PAYMENT_CONFIG</strong> topic. Each method (CashApp, Zelle, Chime, etc.) has its own QR.</p>
             
             <div class="step">
                 <span class="step-number">1</span> Navigate to <strong>PAYMENT_CONFIG</strong> topic
             </div>
             <div class="step">
                 <span class="step-number">2</span> Upload photo or document with caption:<br/>
-                <code style="background: #e0e7ff; padding: 4px 8px; border-radius: 3px; display: inline-block; margin-top: 5px;">PAYMENT_QR | game=GameA</code>
+                <code style="background: #e0e7ff; padding: 4px 8px; border-radius: 3px; display: inline-block; margin-top: 5px;">PAYMENT_QR | game=GameA | method=CashApp</code>
             </div>
             <div class="step">
-                <span class="step-number">3</span> Bot stores this as canonical payment QR for GameA
+                <span class="step-number">3</span> Bot stores this as canonical payment QR for <code>GameA::CashApp</code>
             </div>
             <div class="step">
-                <span class="step-number">4</span> When users load balance, bot displays this QR in their flow
+                <span class="step-number">4</span> When users load balance they will first select a payment method; after selection the bot displays the corresponding QR
             </div>
             
             <h3 style="margin-top: 25px;">Updating Payment QR</h3>
-            <p>To change a game's payment QR:</p>
+            <p>To change a game's payment QR for a specific method:</p>
             <ol>
-                <li>Go to PAYMENT_CONFIG topic</li>
-                <li>Upload the new QR image/document with caption <code>PAYMENT_QR | game=GameA</code></li>
-                <li>Bot automatically replaces the old QR with the new one</li>
+                <li>Go to <strong>PAYMENT_CONFIG</strong> topic</li>
+                <li>Upload the new QR image/document with caption <code>PAYMENT_QR | game=GameA | method=CashApp</code></li>
+                <li>Bot edits the existing canonical QR message for that game+method instead of creating duplicates</li>
             </ol>
-            
+
+            <h3 style="margin-top: 25px;">Enable / Disable Methods</h3>
+            <p>Admins can disable or enable a configured payment method so it no longer appears to users:</p>
+            <div class="command-block">
+                <div class="command-name">Disable method</div>
+                <code>PAYMENT_METHOD_DISABLE | game=GameA | method=CashApp</code>
+            </div>
+            <div class="command-block">
+                <div class="command-name">Enable method</div>
+                <code>PAYMENT_METHOD_ENABLE | game=GameA | method=CashApp</code>
+            </div>
+
             <h3 style="margin-top: 25px;">Supported Formats</h3>
             <ul>
                 <li>✅ Photo (PNG, JPG) - displayed inline in user's load flow</li>
@@ -885,11 +896,54 @@ ACCOUNT | game=GAMEID | username=USERNAME | password=PASSWORD | status=STATUS
             </ul>
             
             <div class="info">
-                <strong>💡 Important:</strong> If a game has no payment QR configured, users cannot load balance for that game. Configure QR before making game ACTIVE.
+                <strong>💡 Important:</strong> If a game has no enabled payment methods configured, users cannot load balance for that game. Configure and enable at least one method before making a game ACTIVE.
             </div>
         </div>
 
         <!-- SECTION 10 -->
+        <h2>🔟 Support Tickets</h2>
+        <div class="section">
+            <h3>Purpose</h3>
+            <p>The Support Tickets feature allows users to open a ticket that appears in the <strong>SUPPORT_TICKETS</strong> topic. Admins can review, reply, and resolve tickets from the forum topic. All activity is auditable and persisted in snapshots.</p>
+
+            <h3 style="margin-top: 20px;">How Users Submit</h3>
+            <div class="step">
+                <span class="step-number">1</span> User clicks <strong>💬 Support</strong> in the main menu
+            </div>
+            <div class="step">
+                <span class="step-number">2</span> User enters a short <em>subject</em>
+            </div>
+            <div class="step">
+                <span class="step-number">3</span> User enters the detailed message
+            </div>
+            <div class="step">
+                <span class="step-number">4</span> Bot posts the ticket to <strong>SUPPORT_TICKETS</strong> with a unique Ticket ID and admin controls
+            </div>
+
+            <h3 style="margin-top: 20px;">Admin Workflow</h3>
+            <ol>
+                <li>Open the <strong>SUPPORT_TICKETS</strong> topic to view tickets (Topic ID: 94)</li>
+                <li>Each ticket includes three buttons: <strong>✅ Resolve</strong>, <strong>❌ Close</strong>, <strong>💬 Reply</strong></li>
+                <li>Click <strong>💬 Reply</strong> to start a reply — the bot will DM the admin to collect the reply (or you may post directly in the topic)</li>
+                <li>After the admin reply is posted, the bot will notify the ticket owner (DM) with the admin message and a <strong>↩ Reply</strong> button so the user can respond</li>
+                <li>Continue back-and-forth until the admin clicks <strong>✅ Resolve</strong> or <strong>❌ Close</strong></li>
+            </ol>
+
+            <h3 style="margin-top: 20px;">Admin Reply Examples</h3>
+            <div class="command-block">
+                <div class="command-name">Reply flow</div>
+                <code>Admin clicks Reply → Bot DMs admin → Admin sends reply → Bot appends reply to ticket and DMs user</code>
+            </div>
+
+            <div class="info">
+                <strong>💡 Notes:</strong>
+                <ul>
+                    <li>Replies include admin identity and timestamp.</li>
+                    <li>Users can reply to admin responses via the <strong>↩ Reply</strong> button in the DM; their response is appended to the ticket.</li>
+                    <li>All ticket state (open/closed/replies) is saved in snapshots and restored on restart.</li>
+                </ul>
+            </div>
+        </div>
         <h2>🔟 System Monitoring & Maintenance</h2>
         <div class="section">
             <h3>Monitoring System Health</h3>
