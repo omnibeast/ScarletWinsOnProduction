@@ -43,6 +43,7 @@ const TOPIC_THREAD_IDS = {
   MANAGE_GAMES: 20,
   PAYMENT_CONFIG: 57,
   ADMIN_USER_MSGS: 59,
+  SUPPORT_TICKETS: 186,
   SYSTEM_BACKUPS: 92,
 };
 
@@ -117,10 +118,19 @@ const assignedByUserGame = new Map();
 const knownUsers = new Map();
 
 /**
- * Payment QR config per game (canonical bot-sent message in PAYMENT_CONFIG topic).
- * @type {Map<string, {game:string, type:"photo"|"document", file_id:string, message_id:number}>}
+ * Payment QR config per game+method (key = `${game}::${method}`).
+ * Each entry: { game, method, type: "photo"|"document", file_id, message_id }
+ * Admin sets via PAYMENT_CONFIG topic with caption: PAYMENT_QR | game=GameA | method=CashApp
  */
 const paymentQRs = new Map();
+
+/**
+ * Disabled payment methods (key = `${game}::${method}`, value = true if disabled).
+ * Admin controls via PAYMENT_CONFIG topic messages:
+ * - PAYMENT_METHOD_DISABLE | game=GameA | method=CashApp
+ * - PAYMENT_METHOD_ENABLE | game=GameA | method=CashApp
+ */
+const disabledMethods = new Map();
 
 /**
  * Approval requests (ephemeral, restored via snapshot+inflight only).
@@ -168,7 +178,22 @@ const approvalRequests = new Map();
  */
 const userFlows = new Map();
 
-// Admin interactive states (reject reason, promo text, msguser steps)
+/**
+ * Support tickets (user→admin communication).
+ * @type {Map<string, {
+ *   ticket_id:string,
+ *   user_id:number,
+ *   username?:string,
+ *   first_name?:string,
+ *   subject:string,
+ *   message:string,
+ *   created_at:string,
+ *   status:"OPEN"|"RESOLVED"|"CLOSED",
+ *   replies:Array<{by:string, text:string, timestamp:string}>,
+ *   message_thread_id?:number
+ * }>}
+ */
+const supportTickets = new Map();// Admin interactive states (reject reason, promo text, msguser steps)
 /**
  * @type {Map<number, { kind:"REJECT_REASON", request_id:string, topic_thread_id:number, approvals_message_id:number } | { kind:"PROMO_TEXT" } | { kind:"MSGUSER_USERID" } | { kind:"MSGUSER_TEXT", target_user_id:number } >}
  */
@@ -500,6 +525,7 @@ function buildMainMenuKeyboard() {
       [{ text: "👤 View My Account", callback_data: cb(["U", "MENU", "VIEW"]) }],
       [{ text: "🟦 Load Balance", callback_data: cb(["U", "MENU", "LOAD"]) }],
       [{ text: "🟩 Cashout", callback_data: cb(["U", "MENU", "CASHOUT"]) }],
+      [{ text: "💬 Support", callback_data: cb(["U", "MENU", "SUPPORT"]) }],
       [{ text: "🎮 Change Game", callback_data: cb(["U", "MENU", "CHANGE_GAME"]) }],
     ],
   };
@@ -523,6 +549,16 @@ function buildLoadStepKeyboard(step, canProceed) {
     rows.push([{ text: "🔁 Re-check", callback_data: cb(["U", "FLOW", "LOAD", "RENDER"]) }]);
   }
   rows.push([{ text: "✖ Cancel", callback_data: cb(["U", "FLOW", "LOAD", "CANCEL"]) }]);
+  return { inline_keyboard: rows };
+}
+
+function buildPaymentMethodKeyboard(gameId) {
+  const methodKeys = Array.from(paymentQRs.keys()).filter(k => k.startsWith(`${gameId}::`));
+  const methods = methodKeys
+    .map(k => k.split("::")[1])
+    .filter(m => !disabledMethods.get(`${gameId}::${m}`));
+  const rows = methods.map(m => [{ text: m, callback_data: cb(["U", "PAYMETHOD", m, gameId]) }]);
+  rows.push([{ text: "↩ Back", callback_data: cb(["U", "FLOW", "LOAD", "RENDER"]) }]);
   return { inline_keyboard: rows };
 }
 
@@ -594,7 +630,9 @@ function snapshotObject() {
   const assigned = Array.from(assignedByUserGame.entries());
   const users = Array.from(knownUsers.entries());
   const qrs = Array.from(paymentQRs.entries());
-  return { games, accounts, assigned, users, qrs };
+  const disabled = Array.from(disabledMethods.entries());
+  const tickets = Array.from(supportTickets.entries());
+  return { games, accounts, assigned, users, qrs, disabled, tickets };
 }
 
 function buildSnapshotText() {
@@ -609,6 +647,8 @@ function buildSnapshotText() {
     `AssignedMap: ${json(snap.assigned)}`,
     `KnownUsers: ${json(snap.users)}`,
     `PaymentQRs: ${json(snap.qrs)}`,
+    `DisabledMethods: ${json(snap.disabled)}`,
+    `SupportTickets: ${json(snap.tickets)}`,
   ].join("\n");
 }
 
@@ -622,6 +662,8 @@ function parseSnapshotText(text) {
   const assignedLine = getLine("AssignedMap: ");
   const usersLine = getLine("KnownUsers: ");
   const qrsLine = getLine("PaymentQRs: ");
+  const disabledLine = getLine("DisabledMethods: ");
+  const ticketsLine = getLine("SupportTickets: ");
   if (!gamesLine || !accountsLine || !assignedLine || !usersLine || !qrsLine) return null;
   const parseJson = (line) => {
     const idx = line.indexOf(": ");
@@ -639,6 +681,8 @@ function parseSnapshotText(text) {
     assigned: parseJson(assignedLine),
     users: parseJson(usersLine),
     qrs: parseJson(qrsLine),
+    disabled: disabledLine ? parseJson(disabledLine) : [],
+    tickets: ticketsLine ? parseJson(ticketsLine) : [],
   };
 }
 
@@ -655,6 +699,8 @@ function rehydrateFromSnapshot(parsed) {
   assignedByUserGame.clear();
   knownUsers.clear();
   paymentQRs.clear();
+  disabledMethods.clear();
+  supportTickets.clear();
   availableQueueByGame.clear();
 
   for (const [id, g] of parsed.games) {
@@ -681,6 +727,16 @@ function rehydrateFromSnapshot(parsed) {
   for (const [game, qr] of parsed.qrs) {
     if (!game || !qr) continue;
     paymentQRs.set(game, qr);
+  }
+
+  for (const [key, disabled] of parsed.disabled || []) {
+    if (!key) continue;
+    disabledMethods.set(key, !!disabled);
+  }
+
+  for (const [ticketId, ticket] of parsed.tickets || []) {
+    if (!ticketId || !ticket) continue;
+    supportTickets.set(ticketId, ticket);
   }
 
   return true;
@@ -913,6 +969,144 @@ async function startEmailFlow(userId) {
   });
 }
 
+async function startSupportFlow(userId) {
+  const chatId = userId;
+  const msg = await withRetry(() =>
+    bot.sendMessage(
+      chatId,
+      [
+        "💬 <b>Support Ticket</b>",
+        "Step 1 / 2",
+        "",
+        "Please enter a <b>subject</b> for your support request:",
+      ].join("\n"),
+      { parse_mode: "HTML", reply_markup: buildFlowNavKeyboard("SUPPORT") },
+    ),
+  );
+  userFlows.set(userId, {
+    kind: "SUPPORT",
+    chat_id: chatId,
+    message_id: msg.message_id,
+    step: "WAIT_SUBJECT",
+    started_at: isoNow(),
+  });
+}
+
+function renderSupportText(flow, note) {
+  const lines = [];
+  lines.push("💬 <b>Support Ticket</b>");
+  if (flow.step === "WAIT_SUBJECT") lines.push("Step 1 / 2");
+  if (flow.step === "WAIT_MESSAGE") lines.push("Step 2 / 2");
+  if (flow.step === "PROCESSING") lines.push("⏳ Submitting…");
+  if (flow.step === "DONE") lines.push("✅ Submitted");
+  lines.push("");
+  lines.push(`📝 Subject: <code>${flow.subject || "-"}</code>`);
+  lines.push("");
+  if (flow.step === "WAIT_SUBJECT") lines.push("Enter a <b>subject</b>:");
+  if (flow.step === "WAIT_MESSAGE") lines.push("Enter your <b>detailed message</b>:");
+  if (flow.step === "PROCESSING") lines.push("Please wait…");
+  if (flow.step === "DONE") {
+    lines.push(`✅ Your ticket has been submitted`);
+    lines.push(`Ticket ID: <code>${flow.ticket_id}</code>`);
+  }
+  if (note) {
+    lines.push("");
+    lines.push(`⚠️ <i>${note}</i>`);
+  }
+  return lines.join("\n");
+}
+
+async function renderSupportFlow(userId, note) {
+  const flow = userFlows.get(userId);
+  if (!flow || flow.kind !== "SUPPORT") return;
+  const text = renderSupportText(flow, note);
+  await safeEditText(flow.chat_id, flow.message_id, text, buildFlowNavKeyboard("SUPPORT"));
+}
+
+async function submitSupportTicket(flow) {
+  const ticketId = newRequestId("T");
+  const user = knownUsers.get(flow.chat_id);
+  const ticket = {
+    ticket_id: ticketId,
+    user_id: flow.chat_id,
+    username: user?.username || "-",
+    first_name: user?.first_name || "-",
+    subject: flow.subject,
+    message: flow.message,
+    created_at: isoNow(),
+    status: "OPEN",
+    replies: [],
+  };
+  supportTickets.set(ticketId, ticket);
+
+  const caption = [
+    "💬 <b>SUPPORT TICKET</b>",
+    "",
+    `Ticket ID: <code>${ticketId}</code>`,
+    `User ID: <code>${flow.chat_id}</code>`,
+    `Username: <code>${ticket.username}</code>`,
+    `Name: <code>${ticket.first_name}</code>`,
+    `Created: <code>${ticket.created_at}</code>`,
+    "",
+    `📋 Subject: <b>${ticket.subject}</b>`,
+    "",
+    `📝 Message:`,
+    `<code>${ticket.message}</code>`,
+    "",
+    `Status: <b>${ticket.status}</b>`,
+  ].join("\n");
+
+  const sent = await sendToTopicText(TOPIC_THREAD_IDS.SUPPORT_TICKETS, caption, {
+    reply_markup: buildAdminTicketKeyboard(ticketId),
+  });
+
+  ticket.message_thread_id = sent.message_id;
+  supportTickets.set(ticketId, ticket);
+  await writeSnapshot();
+  return ticketId;
+}
+
+function buildAdminTicketKeyboard(ticketId) {
+  return {
+    inline_keyboard: [
+      [
+        { text: "✅ Resolve", callback_data: cb(["A", "TICKET", "RESOLVE", ticketId]) },
+        { text: "❌ Close", callback_data: cb(["A", "TICKET", "CLOSE", ticketId]) },
+      ],
+      [{ text: "💬 Reply", callback_data: cb(["A", "TICKET", "REPLY", ticketId]) }],
+    ],
+  };
+}
+
+function formatTicketCaption(ticket) {
+  const cap = [
+    "💬 <b>SUPPORT TICKET</b>",
+    "",
+    `Ticket ID: <code>${ticket.ticket_id}</code>`,
+    `User ID: <code>${ticket.user_id}</code>`,
+    `Username: <code>${ticket.username}</code>`,
+    `Name: <code>${ticket.first_name}</code>`,
+    `Created: <code>${ticket.created_at}</code>`,
+    "",
+    `📋 Subject: <b>${ticket.subject}</b>`,
+    "",
+    `📝 Message:`,
+    `<code>${ticket.message}</code>`,
+    "",
+    `Status: <b>${ticket.status}</b>`,
+  ];
+  if (ticket.replies && ticket.replies.length > 0) {
+    cap.push("");
+    cap.push("<b>💬 Replies:</b>");
+    for (const r of ticket.replies) {
+      cap.push(`[${r.by} @ ${r.timestamp}]`);
+      cap.push(`<code>${r.text}</code>`);
+      cap.push("");
+    }
+  }
+  return cap.join("\n");
+}
+
 async function renderEmailFlow(userId, note) {
   const flow = userFlows.get(userId);
   if (!flow || flow.kind !== "EMAIL") return;
@@ -949,8 +1143,9 @@ async function startLoadFlow(userId) {
     return msg;
   }
 
-  const qr = paymentQRs.get(game);
-  if (!qr) {
+  // Check if any methods are configured for this game
+  const methodKeys = Array.from(paymentQRs.keys()).filter(k => k.startsWith(`${game}::`) && !disabledMethods.get(k));
+  if (methodKeys.length === 0) {
     const msg = await withRetry(() =>
       bot.sendMessage(
         chatId,
@@ -959,7 +1154,7 @@ async function startLoadFlow(userId) {
           "",
           `🎮 Game: <b>${game}</b>`,
           "",
-          "⚠️ <b>Payment QR not configured</b>",
+          "⚠️ <b>No payment methods available</b>",
           "Please contact an admin.",
         ].join("\n"),
         { parse_mode: "HTML", reply_markup: buildMainMenuKeyboard() },
@@ -968,27 +1163,27 @@ async function startLoadFlow(userId) {
     return msg;
   }
 
-  // Start as a media message so we can always keep QR displayed in the same message.
+  // Start at method selection step (no QR yet)
   const caption = [
     "🟦 <b>Load Balance</b>",
-    "Step 1 / 4",
+    "Step 1 / 5",
     "",
     `🎮 Game: <b>${game}</b>`,
     "",
-    "Enter your username:",
+    "💳 <b>Select Payment Method:</b>",
   ].join("\n");
 
-  const sent =
-    qr.type === "photo"
-      ? await withRetry(() => bot.sendPhoto(chatId, qr.file_id, { caption, parse_mode: "HTML", reply_markup: buildLoadStepKeyboard("WAIT_USERNAME") }))
-      : await withRetry(() => bot.sendDocument(chatId, qr.file_id, { caption, parse_mode: "HTML", reply_markup: buildLoadStepKeyboard("WAIT_USERNAME") }));
+  const sent = await withRetry(() =>
+    bot.sendMessage(chatId, caption, { parse_mode: "HTML", reply_markup: buildPaymentMethodKeyboard(game) }),
+  );
 
   userFlows.set(userId, {
     kind: "LOAD",
     chat_id: chatId,
     message_id: sent.message_id,
-    step: "WAIT_USERNAME",
+    step: "WAIT_METHOD_SELECT",
     game,
+    pay_method: null,
     started_at: isoNow(),
   });
 }
@@ -996,18 +1191,21 @@ async function startLoadFlow(userId) {
 function renderLoadCaption(flow, note) {
   const lines = [];
   lines.push("🟦 <b>Load Balance</b>");
-  if (flow.step === "WAIT_USERNAME") lines.push("Step 1 / 4");
-  if (flow.step === "WAIT_AMOUNT") lines.push("Step 2 / 4");
-  if (flow.step === "QR_WAIT_PAID") lines.push("Step 3 / 4");
-  if (flow.step === "WAIT_SCREENSHOT") lines.push("Step 4 / 4");
+  if (flow.step === "WAIT_METHOD_SELECT") lines.push("Step 1 / 5");
+  if (flow.step === "WAIT_USERNAME") lines.push("Step 2 / 5");
+  if (flow.step === "WAIT_AMOUNT") lines.push("Step 3 / 5");
+  if (flow.step === "QR_WAIT_PAID") lines.push("Step 4 / 5");
+  if (flow.step === "WAIT_SCREENSHOT") lines.push("Step 5 / 5");
   if (flow.step === "PROCESSING") lines.push("⏳ Processing…");
   if (flow.step === "DONE") lines.push("✅ Complete");
   lines.push("");
   lines.push(`🎮 Game: <b>${flow.game}</b>`);
   lines.push("");
+  if (flow.pay_method) lines.push(`💳 Method: <b>${flow.pay_method}</b>`);
   lines.push(`👤 Username: <code>${flow.username || "-"}</code>`);
   lines.push(`💵 Amount: <b>${typeof flow.amount === "number" ? flow.amount : "-"}</b>`);
   lines.push("");
+  if (flow.step === "WAIT_METHOD_SELECT") lines.push("💳 <b>Select Payment Method:</b>");
   if (flow.step === "WAIT_USERNAME") lines.push("Enter your username:");
   if (flow.step === "WAIT_AMOUNT") lines.push("Enter amount:");
   if (flow.step === "QR_WAIT_PAID") {
@@ -1200,6 +1398,7 @@ function approvalCaption(req) {
   lines.push(`User ID: <code>${req.user_id}</code>`);
   lines.push(`Username: <code>${req.username}</code>`);
   lines.push(`Amount: <b>${req.amount}</b>`);
+  if (req.pay_method) lines.push(`Payment Method: <b>${req.pay_method}</b>`);
   if (req.type === "CASHOUT") lines.push(`Cashtag: <code>${req.cashtag || "-"}</code>`);
   lines.push("");
   lines.push(`Status: <b>${req.status}</b>`);
@@ -1221,6 +1420,7 @@ async function submitLoadForApproval(flow, screenshotFileId) {
     user_id: flow.chat_id,
     username: flow.username,
     amount: flow.amount,
+    pay_method: flow.pay_method,
     created_at: isoNow(),
     status: "PENDING",
     screenshot_file_id: screenshotFileId,
@@ -1250,6 +1450,7 @@ async function submitCashoutForApproval(flow, receivingQr) {
     user_id: flow.chat_id,
     username: flow.username,
     amount: flow.amount,
+    pay_method: flow.pay_method,
     cashtag: flow.cashtag,
     created_at: isoNow(),
     status: "PENDING",
@@ -1378,19 +1579,20 @@ async function syncDefaultGamesIfFirstBoot(hadState) {
 // =========================
 // PAYMENT CONFIG (PAYMENT_QR records)
 // =========================
-async function upsertPaymentQr(gameId, media) {
-  const existing = paymentQRs.get(gameId);
-  const caption = `PAYMENT_QR | game=${gameId}`;
+async function upsertPaymentQr(gameId, method, media) {
+  const key = `${gameId}::${method}`;
+  const existing = paymentQRs.get(key);
+  const caption = `PAYMENT_QR | game=${gameId} | method=${method}`;
 
   if (!existing) {
     const sent =
       media.type === "photo"
         ? await sendToTopicPhoto(TOPIC_THREAD_IDS.PAYMENT_CONFIG, media.file_id, caption)
         : await sendToTopicDocument(TOPIC_THREAD_IDS.PAYMENT_CONFIG, media.file_id, caption);
-    paymentQRs.set(gameId, { game: gameId, type: media.type, file_id: media.file_id, message_id: sent.message_id });
+    paymentQRs.set(key, { game: gameId, method, type: media.type, file_id: media.file_id, message_id: sent.message_id });
     await sendToTopicText(
       TOPIC_THREAD_IDS.TRANSACTION_LOGS,
-      ["💳 <b>PAYMENT QR SET</b>", `Game: <b>${gameId}</b>`, `Msg ID: <code>${sent.message_id}</code>`, `Timestamp: <code>${isoNow()}</code>`].join("\n"),
+      ["💳 <b>PAYMENT QR SET</b>", `Game: <b>${gameId}</b>`, `Method: <b>${method}</b>`, `Msg ID: <code>${sent.message_id}</code>`, `Timestamp: <code>${isoNow()}</code>`].join("\n"),
     );
     await writeSnapshot();
     return;
@@ -1403,10 +1605,10 @@ async function upsertPaymentQr(gameId, media) {
       : { type: "document", media: media.file_id, caption, parse_mode: "HTML" };
 
   await safeEditMedia(ADMIN_GROUP_ID, existing.message_id, inputMedia, undefined);
-  paymentQRs.set(gameId, { game: gameId, type: media.type, file_id: media.file_id, message_id: existing.message_id });
+  paymentQRs.set(key, { game: gameId, method, type: media.type, file_id: media.file_id, message_id: existing.message_id });
   await sendToTopicText(
     TOPIC_THREAD_IDS.TRANSACTION_LOGS,
-    ["💳 <b>PAYMENT QR UPDATED</b>", `Game: <b>${gameId}</b>`, `Msg ID: <code>${existing.message_id}</code>`, `Timestamp: <code>${isoNow()}</code>`].join("\n"),
+    ["💳 <b>PAYMENT QR UPDATED</b>", `Game: <b>${gameId}</b>`, `Method: <b>${method}</b>`, `Msg ID: <code>${existing.message_id}</code>`, `Timestamp: <code>${isoNow()}</code>`].join("\n"),
   );
   await writeSnapshot();
 }
@@ -1467,16 +1669,42 @@ async function handlePaymentConfigTopicMessage(msg) {
   const kv = parseKVLine(caption, "PAYMENT_QR |");
   if (!kv || !kv.game) return;
   const gameId = kv.game;
+  const method = kv.method || "DEFAULT";
 
   const photoFileId = pickBestPhotoFileId(msg.photo);
   if (photoFileId) {
-    await upsertPaymentQr(gameId, { type: "photo", file_id: photoFileId });
+    await upsertPaymentQr(gameId, method, { type: "photo", file_id: photoFileId });
     return;
   }
 
   if (msg.document?.file_id) {
-    await upsertPaymentQr(gameId, { type: "document", file_id: msg.document.file_id });
+    await upsertPaymentQr(gameId, method, { type: "document", file_id: msg.document.file_id });
   }
+}
+
+async function handlePaymentMethodStatusMessage(msg, action) {
+  // action = "DISABLE" or "ENABLE"
+  // Caption format: PAYMENT_METHOD_DISABLE | game=GameA | method=CashApp
+  if (!msg.caption && !msg.text) return;
+  const caption = msg.caption || msg.text || "";
+  const prefix = action === "DISABLE" ? "PAYMENT_METHOD_DISABLE |" : "PAYMENT_METHOD_ENABLE |";
+  const kv = parseKVLine(caption, prefix);
+  if (!kv || !kv.game || !kv.method) return;
+
+  const key = `${kv.game}::${kv.method}`;
+  const disabled = action === "DISABLE";
+  disabledMethods.set(key, disabled);
+  await sendToTopicText(
+    TOPIC_THREAD_IDS.TRANSACTION_LOGS,
+    [
+      disabled ? "🚫 <b>PAYMENT METHOD DISABLED</b>" : "✅ <b>PAYMENT METHOD ENABLED</b>",
+      `Game: <b>${kv.game}</b>`,
+      `Method: <b>${kv.method}</b>`,
+      `By: <code>${adminIdentity(msg.from)}</code>`,
+      `Timestamp: <code>${isoNow()}</code>`,
+    ].join("\n"),
+  );
+  await writeSnapshot();
 }
 
 // =========================
@@ -1584,6 +1812,30 @@ bot.on("message", async (msg) => {
 
     // PRIVATE CHAT COMMANDS
     if (isPrivate(msg)) {
+      // Allow admins to submit ticket replies via private chat when prompted
+      if (msg.from?.id) {
+        const ai = adminInputs.get(msg.from.id);
+        if (ai && ai.kind === "TICKET_REPLY") {
+          if (!msg.text) {
+            await bot.sendMessage(msg.from.id, "Please send your reply as text.");
+            return;
+          }
+          const replyText = msg.text.trim();
+          adminInputs.delete(msg.from.id);
+          const ticket = supportTickets.get(ai.ticket_id);
+          if (!ticket) {
+            await bot.sendMessage(msg.from.id, "Ticket not found.");
+            return;
+          }
+          ticket.replies.push({ by: adminIdentity(msg.from), text: replyText, timestamp: isoNow() });
+          supportTickets.set(ai.ticket_id, ticket);
+          const cap = formatTicketCaption(ticket);
+          await safeEditText(ADMIN_GROUP_ID, ai.ticket_message_id, cap, buildAdminTicketKeyboard(ai.ticket_id));
+          await bot.sendMessage(msg.from.id, `Reply posted to ticket ${ai.ticket_id}.`);
+          await writeSnapshot();
+          return;
+        }
+      }
       if (safeText(msg.text).trim() === "/start") {
         const uid = msg.from.id;
         const game = selectedGameForUser(uid);
@@ -1733,6 +1985,39 @@ bot.on("message", async (msg) => {
 
           return;
         }
+
+        if (flow.kind === "SUPPORT") {
+          if (flow.step === "WAIT_SUBJECT") {
+            if (!msg.text) {
+              await renderSupportFlow(uid, "Please send your subject as text.");
+              return;
+            }
+            flow.subject = msg.text.trim();
+            flow.step = "WAIT_MESSAGE";
+            userFlows.set(uid, flow);
+            await renderSupportFlow(uid);
+            return;
+          }
+
+          if (flow.step === "WAIT_MESSAGE") {
+            if (!msg.text) {
+              await renderSupportFlow(uid, "Please send your message as text.");
+              return;
+            }
+            flow.message = msg.text.trim();
+            flow.step = "PROCESSING";
+            userFlows.set(uid, flow);
+
+            const ticketId = await submitSupportTicket(flow);
+            flow.ticket_id = ticketId;
+            flow.step = "DONE";
+            userFlows.set(uid, flow);
+            await renderSupportFlow(uid);
+            return;
+          }
+
+          return;
+        }
       }
 
       // If no flow, ignore free text (menu is inline keyboard driven)
@@ -1751,6 +2036,17 @@ bot.on("message", async (msg) => {
         return;
       }
       if (threadId === TOPIC_THREAD_IDS.PAYMENT_CONFIG) {
+        // Check for PAYMENT_METHOD_DISABLE
+        if (msg.caption?.includes("PAYMENT_METHOD_DISABLE") || msg.text?.includes("PAYMENT_METHOD_DISABLE")) {
+          await handlePaymentMethodStatusMessage(msg, "DISABLE");
+          return;
+        }
+        // Check for PAYMENT_METHOD_ENABLE
+        if (msg.caption?.includes("PAYMENT_METHOD_ENABLE") || msg.text?.includes("PAYMENT_METHOD_ENABLE")) {
+          await handlePaymentMethodStatusMessage(msg, "ENABLE");
+          return;
+        }
+        // Otherwise, treat as payment QR config
         await handlePaymentConfigTopicMessage(msg);
         return;
       }
@@ -1814,6 +2110,26 @@ bot.on("message", async (msg) => {
           if (!reason) return;
           adminInputs.delete(msg.from.id);
           await finalizeDecision(ai.request_id, "REJECTED", adminIdentity(msg.from), reason);
+          return;
+        }
+
+        if (ai.kind === "TICKET_REPLY") {
+          // Reply must be in support tickets topic thread
+          if (getThreadId(msg) !== ai.topic_thread_id) return;
+          const replyText = (msg.text || "").trim();
+          if (!replyText) return;
+          adminInputs.delete(msg.from.id);
+          const ticket = supportTickets.get(ai.ticket_id);
+          if (!ticket) return;
+          ticket.replies.push({
+            by: adminIdentity(msg.from),
+            text: replyText,
+            timestamp: isoNow(),
+          });
+          supportTickets.set(ai.ticket_id, ticket);
+          const cap = formatTicketCaption(ticket);
+          await safeEditText(ADMIN_GROUP_ID, ai.ticket_message_id, cap, buildAdminTicketKeyboard(ai.ticket_id));
+          await writeSnapshot();
           return;
         }
       }
@@ -1962,6 +2278,41 @@ bot.on("callback_query", async (q) => {
           await startCashoutFlow(userId);
           return;
         }
+
+        if (action === "SUPPORT") {
+          await startSupportFlow(userId);
+          return;
+        }
+      }
+
+      if (parts[1] === "PAYMETHOD") {
+        const method = parts[2];
+        const gameId = parts[3];
+        await answerCb(q.id, `Selected ${method}`);
+        const flow = userFlows.get(userId);
+        if (!flow || flow.kind !== "LOAD") return;
+
+        const key = `${flow.game}::${method}`;
+        const qr = paymentQRs.get(key);
+        if (!qr) {
+          await answerCbAlert(q.id, "QR not found for this method");
+          return;
+        }
+
+        // Update flow with selected method and move to WAIT_USERNAME step
+        flow.pay_method = method;
+        flow.step = "WAIT_USERNAME";
+        userFlows.set(userId, flow);
+
+        // Send QR media with username prompt
+        const caption = renderLoadCaption(flow);
+        const inputMedia =
+          qr.type === "photo"
+            ? { type: "photo", media: qr.file_id, caption, parse_mode: "HTML" }
+            : { type: "document", media: qr.file_id, caption, parse_mode: "HTML" };
+
+        await safeEditMedia(flow.chat_id, flow.message_id, inputMedia, buildLoadStepKeyboard(flow.step));
+        return;
       }
 
       if (parts[1] === "FLOW") {
@@ -1999,6 +2350,21 @@ bot.on("callback_query", async (q) => {
             await renderLoadFlow(userId);
             return;
           }
+          if (action === "METHODS") {
+            await answerCb(q.id, "Choose method");
+            if (!flow) return;
+            const prompt = "💳 <b>Select Payment Method</b>";
+            await safeEditCaption(flow.chat_id, flow.message_id, prompt, buildPaymentMethodKeyboard(flow.game));
+            return;
+          }
+        }
+      }
+
+      if (kind === "SUPPORT") {
+        if (action === "CANCEL" || action === "MENU") {
+          await answerCb(q.id, "Cancelled");
+          await cancelUserFlow(userId, "User cancelled");
+          return;
         }
       }
 
@@ -2086,6 +2452,70 @@ bot.on("callback_query", async (q) => {
           const cap = approvalCaption(req);
           if (q.message.caption) await safeEditCaption(ADMIN_GROUP_ID, q.message.message_id, cap, buildAdminApproveRejectKeyboard(requestId));
           else await safeEditText(ADMIN_GROUP_ID, q.message.message_id, cap, buildAdminApproveRejectKeyboard(requestId));
+          return;
+        }
+      }
+
+      // Support tickets
+      if (parts[1] === "TICKET") {
+        const action = parts[2];
+        const ticketId = parts[3];
+        const ticket = supportTickets.get(ticketId);
+        if (!ticket) {
+          await answerCbAlert(q.id, "Ticket not found.");
+          return;
+        }
+
+        if (action === "RESOLVE") {
+          ticket.status = "RESOLVED";
+          supportTickets.set(ticketId, ticket);
+          await answerCb(q.id, "Marked resolved");
+          const cap = formatTicketCaption(ticket);
+          await safeEditText(ADMIN_GROUP_ID, ticket.message_thread_id, cap, buildAdminTicketKeyboard(ticketId));
+          await writeSnapshot();
+          return;
+        }
+
+        if (action === "CLOSE") {
+          ticket.status = "CLOSED";
+          supportTickets.set(ticketId, ticket);
+          await answerCb(q.id, "Marked closed");
+          const cap = formatTicketCaption(ticket);
+          await safeEditText(ADMIN_GROUP_ID, ticket.message_thread_id, cap, buildAdminTicketKeyboard(ticketId));
+          await writeSnapshot();
+          return;
+        }
+
+        if (action === "REPLY") {
+          await answerCb(q.id, "Enter reply — I'll DM you to collect it.");
+          adminInputs.set(fromId, {
+            kind: "TICKET_REPLY",
+            ticket_id: ticketId,
+            topic_thread_id: TOPIC_THREAD_IDS.SUPPORT_TICKETS,
+            ticket_message_id: ticket.message_thread_id,
+          });
+          const prompt = [
+            "💬 <b>Replying to Ticket…</b>",
+            "",
+            `Ticket ID: <code>${ticketId}</code>`,
+            "",
+            "You can reply in this topic or send your reply in the private chat I just opened.",
+          ].join("\n");
+          await safeEditText(ADMIN_GROUP_ID, ticket.message_thread_id, prompt, buildAdminRejectCancelKeyboard(ticketId));
+
+          // Also DM the admin to collect the reply (easier UX)
+          try {
+            await withRetry(() =>
+              bot.sendMessage(fromId, [
+                `💬 Replying to Ticket <b>${ticketId}</b>`,
+                "",
+                "Send your reply message here and I'll post it to the support ticket thread.",
+                "(Or post directly in the support topic.)",
+              ].join("\n"), { parse_mode: "HTML" }),
+            );
+          } catch (e) {
+            // ignore DM failure (admin may have DMs closed)
+          }
           return;
         }
       }
