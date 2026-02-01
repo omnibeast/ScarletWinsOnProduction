@@ -1,0 +1,1200 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Telegram Game Account Manager - Admin SOP</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            line-height: 1.6;
+            color: #333;
+            background: #f5f5f5;
+            padding: 20px;
+        }
+        
+        .container {
+            max-width: 900px;
+            margin: 0 auto;
+            background: white;
+            padding: 40px;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+        }
+        
+        header {
+            text-align: center;
+            border-bottom: 3px solid #2563eb;
+            padding-bottom: 30px;
+            margin-bottom: 40px;
+        }
+        
+        h1 {
+            color: #1e40af;
+            font-size: 2.5em;
+            margin-bottom: 10px;
+        }
+        
+        .subtitle {
+            color: #666;
+            font-size: 1.1em;
+            margin-bottom: 20px;
+        }
+        
+        .date {
+            color: #999;
+            font-size: 0.95em;
+        }
+        
+        h2 {
+            color: #1e40af;
+            font-size: 1.8em;
+            margin-top: 40px;
+            margin-bottom: 20px;
+            border-left: 4px solid #2563eb;
+            padding-left: 15px;
+        }
+        
+        h3 {
+            color: #2563eb;
+            font-size: 1.3em;
+            margin-top: 25px;
+            margin-bottom: 15px;
+        }
+        
+        .section {
+            margin-bottom: 30px;
+        }
+        
+        .command-block {
+            background: #f0f4ff;
+            border-left: 4px solid #2563eb;
+            padding: 20px;
+            margin: 20px 0;
+            border-radius: 4px;
+        }
+        
+        .command-block code {
+            background: #e0e7ff;
+            padding: 2px 6px;
+            border-radius: 3px;
+            font-family: 'Courier New', monospace;
+            font-weight: bold;
+            color: #1e40af;
+        }
+        
+        .command-name {
+            font-size: 1.2em;
+            color: #1e40af;
+            margin-bottom: 10px;
+            font-weight: bold;
+        }
+        
+        .usage {
+            background: #fff9e6;
+            padding: 15px;
+            margin: 15px 0;
+            border-radius: 4px;
+            border-left: 3px solid #f59e0b;
+        }
+        
+        .usage strong {
+            color: #d97706;
+        }
+        
+        .step {
+            margin: 15px 0;
+            padding: 15px;
+            background: #f3f4f6;
+            border-radius: 4px;
+            border-left: 3px solid #6366f1;
+        }
+        
+        .step-number {
+            display: inline-block;
+            background: #6366f1;
+            color: white;
+            width: 30px;
+            height: 30px;
+            border-radius: 50%;
+            text-align: center;
+            line-height: 30px;
+            font-weight: bold;
+            margin-right: 10px;
+        }
+        
+        .topic-list {
+            background: #ecfdf5;
+            padding: 20px;
+            border-radius: 4px;
+            margin: 20px 0;
+        }
+        
+        .topic-item {
+            margin: 12px 0;
+            padding: 10px;
+            background: white;
+            border-left: 3px solid #10b981;
+            border-radius: 3px;
+        }
+        
+        .topic-name {
+            font-weight: bold;
+            color: #047857;
+            font-family: 'Courier New', monospace;
+        }
+        
+        .topic-id {
+            color: #666;
+            font-size: 0.9em;
+        }
+        
+        .approval-flow {
+            background: #fef3c7;
+            padding: 20px;
+            border-radius: 4px;
+            margin: 20px 0;
+            border: 2px solid #f59e0b;
+        }
+        
+        .approval-step {
+            margin: 12px 0;
+            padding: 10px;
+        }
+        
+        .approval-step .emoji {
+            margin-right: 8px;
+            font-size: 1.2em;
+        }
+        
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 20px 0;
+            background: white;
+            border-radius: 4px;
+            overflow: hidden;
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+        }
+        
+        thead {
+            background: #1e40af;
+            color: white;
+        }
+        
+        th {
+            padding: 15px;
+            text-align: left;
+            font-weight: 600;
+        }
+        
+        td {
+            padding: 12px 15px;
+            border-bottom: 1px solid #e5e7eb;
+        }
+        
+        tbody tr:hover {
+            background: #f0f4ff;
+        }
+        
+        .warning {
+            background: #fee2e2;
+            border-left: 4px solid #dc2626;
+            padding: 15px;
+            border-radius: 4px;
+            margin: 20px 0;
+        }
+        
+        .warning strong {
+            color: #991b1b;
+        }
+        
+        .info {
+            background: #dbeafe;
+            border-left: 4px solid #2563eb;
+            padding: 15px;
+            border-radius: 4px;
+            margin: 20px 0;
+        }
+        
+        .info strong {
+            color: #1e40af;
+        }
+        
+        .success {
+            background: #dcfce7;
+            border-left: 4px solid #16a34a;
+            padding: 15px;
+            border-radius: 4px;
+            margin: 20px 0;
+        }
+        
+        .success strong {
+            color: #15803d;
+        }
+        
+        ul {
+            margin-left: 25px;
+            margin-top: 10px;
+        }
+        
+        li {
+            margin: 8px 0;
+        }
+        
+        footer {
+            margin-top: 50px;
+            padding-top: 20px;
+            border-top: 1px solid #e5e7eb;
+            text-align: center;
+            color: #999;
+            font-size: 0.9em;
+        }
+        
+        .page-break {
+            page-break-after: always;
+            margin: 40px 0;
+        }
+        
+        .toc {
+            background: #f3f4f6;
+            padding: 20px;
+            border-radius: 4px;
+            margin: 20px 0;
+        }
+        
+        .toc ol {
+            margin-left: 25px;
+        }
+        
+        .toc li {
+            margin: 8px 0;
+        }
+        
+        @media print {
+            body {
+                background: white;
+                padding: 0;
+            }
+            .container {
+                box-shadow: none;
+                padding: 30px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>🤖 Telegram Game Account Manager Bot</h1>
+            <p class="subtitle">Administrator Standard Operating Procedures (SOP)</p>
+            <p class="date">Effective: January 31, 2026</p>
+        </header>
+        
+        <section class="toc">
+            <h3>📋 Table of Contents</h3>
+            <ol>
+                <li>Introduction & Overview</li>
+                <li>System Architecture</li>
+                <li>Admin Topics & Data Structure</li>
+                <li>User Workflows</li>
+                <li>Admin Commands</li>
+                <li>Game Management</li>
+                <li>Approval Workflows</li>
+                <li>Inventory Management</li>
+                <li>Payment Configuration</li>
+                <li>System Monitoring & Maintenance</li>
+            </ol>
+        </section>
+
+        <!-- SECTION 1 -->
+        <h2>1️⃣ Introduction & Overview</h2>
+        <div class="section">
+            <h3>Purpose</h3>
+            <p>The Telegram Game Account Manager Bot is a production-ready automated system for managing game account distribution, balance loads, cashouts, and user approvals through Telegram. This document provides comprehensive guidance for administrators.</p>
+            
+            <h3>Key Features</h3>
+            <ul>
+                <li>✅ FIFO account assignment (one account per user per game)</li>
+                <li>✅ Single-message Load Balance & Cashout flows (edit only, no extra messages)</li>
+                <li>✅ Manual admin approval system (auditable)</li>
+                <li>✅ Email collection & validation</li>
+                <li>✅ Promotion broadcasts to all users</li>
+                <li>✅ Direct admin-to-user messaging</li>
+                <li>✅ Complete transaction logging</li>
+                <li>✅ Automatic snapshot backups</li>
+            </ul>
+            
+            <h3>Admin Requirements</h3>
+            <div class="info">
+                <strong>⚠️ Important:</strong> To use admin commands, you must be:
+                <ul>
+                    <li>A <strong>member of the admin supergroup</strong></li>
+                    <li>An <strong>administrator</strong> in that supergroup</li>
+                    <li>Have appropriate permissions to manage topics</li>
+                </ul>
+            </div>
+        </div>
+
+        <!-- SECTION 2 -->
+        <h2>2️⃣ System Architecture</h2>
+        <div class="section">
+            <h3>Polling Mode</h3>
+            <p>The bot operates in <strong>polling mode only</strong> — no webhooks. This means:</p>
+            <ul>
+                <li>Bot continuously checks for new messages every 300ms</li>
+                <li>No external HTTP endpoint required</li>
+                <li>More reliable for unstable connections</li>
+                <li>Standard deployment on any server</li>
+            </ul>
+            
+            <h3>Single File Deployment</h3>
+            <p>The entire bot is contained in a single JavaScript file: <code>bot.js</code></p>
+            <ul>
+                <li>No external databases</li>
+                <li>No filesystem writes</li>
+                <li>All data lives in Telegram</li>
+                <li>In-memory Maps for fast access</li>
+            </ul>
+            
+            <h3>Persistence Model</h3>
+            <p>Telegram messages are the source of truth:</p>
+            <ul>
+                <li>Messages are <strong>never deleted</strong></li>
+                <li>Only <strong>bot-sent messages are edited</strong></li>
+                <li>State snapshots automatically saved every 15 minutes</li>
+                <li>On restart: restore from pinned snapshot</li>
+            </ul>
+        </div>
+
+        <!-- SECTION 3 -->
+        <h2>3️⃣ Admin Topics & Data Structure</h2>
+        <div class="section">
+            <h3>Forum Topics Overview</h3>
+            <p>The admin supergroup must have <strong>Forum Topics enabled</strong>. Each topic acts as a database table:</p>
+            
+            <div class="topic-list">
+                <div class="topic-item">
+                    <div class="topic-name">🎮 MANAGE_GAMES (Topic ID: 20)</div>
+                    <div class="topic-id">Purpose: Game configuration and status</div>
+                    <p style="margin-top: 8px;">Contains bot-sent messages with format:</p>
+                    <code style="background: #e0e7ff; padding: 4px 8px; border-radius: 3px;">GAME | id=GameA | name=Game A | status=ACTIVE</code>
+                </div>
+                
+                <div class="topic-item">
+                    <div class="topic-name">📦 ACCOUNT_INVENTORY (Topic ID: 4)</div>
+                    <div class="topic-id">Purpose: Game account inventory management</div>
+                    <p style="margin-top: 8px;">Format:</p>
+                    <code style="background: #e0e7ff; padding: 4px 8px; border-radius: 3px;">ACCOUNT | game=GameA | username=user1 | password=pass123 | status=AVAILABLE</code>
+                </div>
+                
+                <div class="topic-item">
+                    <div class="topic-name">🟦 LOAD_APPROVALS (Topic ID: 6)</div>
+                    <div class="topic-id">Purpose: Load balance requests awaiting admin approval</div>
+                    <p style="margin-top: 8px;">Contains user's payment screenshot + admin approval buttons</p>
+                </div>
+                
+                <div class="topic-item">
+                    <div class="topic-name">🟩 WITHDRAW_APPROVALS (Topic ID: 8)</div>
+                    <div class="topic-id">Purpose: Cashout requests awaiting admin approval</div>
+                    <p style="margin-top: 8px;">Contains user's receiving QR + admin approval buttons</p>
+                </div>
+                
+                <div class="topic-item">
+                    <div class="topic-name">🧾 TRANSACTION_LOGS (Topic ID: 10)</div>
+                    <div class="topic-id">Purpose: Complete audit trail of all operations</div>
+                    <p style="margin-top: 8px;">Logs: games created, accounts assigned, approvals, rejections</p>
+                </div>
+                
+                <div class="topic-item">
+                    <div class="topic-name">📧 EMAIL_LOGS (Topic ID: 12)</div>
+                    <div class="topic-id">Purpose: Email collection history</div>
+                    <p style="margin-top: 8px;">Logs when users provide their email addresses</p>
+                </div>
+                
+                <div class="topic-item">
+                    <div class="topic-name">📣 PROMOTIONS (Topic ID: 2)</div>
+                    <div class="topic-id">Purpose: Promotion broadcasts</div>
+                    <p style="margin-top: 8px;">Use <code>/promo</code> command to broadcast to all users</p>
+                </div>
+                
+                <div class="topic-item">
+                    <div class="topic-name">💳 PAYMENT_CONFIG (Topic ID: 57)</div>
+                    <div class="topic-id">Purpose: Payment QR codes per game</div>
+                    <p style="margin-top: 8px;">Upload payment QR images/documents here</p>
+                </div>
+                
+                <div class="topic-item">
+                    <div class="topic-name">✉️ ADMIN_USER_MSGS (Topic ID: 59)</div>
+                    <div class="topic-id">Purpose: Admin-to-user messaging logs</div>
+                    <p style="margin-top: 8px;">Use <code>/msguser</code> command to send DMs to users</p>
+                </div>
+                
+                <div class="topic-item">
+                    <div class="topic-name">💾 SYSTEM_BACKUPS (Topic ID: 92)</div>
+                    <div class="topic-id">Purpose: State snapshots for recovery</div>
+                    <p style="margin-top: 8px;">Automatically created every 15 minutes. <strong>Do not modify.</strong></p>
+                </div>
+            </div>
+        </div>
+
+        <!-- SECTION 4 -->
+        <h2>4️⃣ User Workflows</h2>
+        <div class="section">
+            <h3>User Registration Flow (/start)</h3>
+            <p>When a user sends <code>/start</code> in a private chat:</p>
+            <ol>
+                <li>Bot saves user ID to known users</li>
+                <li>If no game selected → show game picker</li>
+                <li>If game selected → show main menu</li>
+            </ol>
+            
+            <h3>Main Menu Options</h3>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Option</th>
+                        <th>Description</th>
+                        <th>Requirements</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td>🧾 Register Account</td>
+                        <td>Get assigned a game account from inventory</td>
+                        <td>Email must be provided first (if new user)</td>
+                    </tr>
+                    <tr>
+                        <td>👤 View My Account</td>
+                        <td>Display assigned username & password</td>
+                        <td>Account must be assigned to user</td>
+                    </tr>
+                    <tr>
+                        <td>🟦 Load Balance</td>
+                        <td>Submit load request with payment proof</td>
+                        <td>Account assigned; payment QR configured</td>
+                    </tr>
+                    <tr>
+                        <td>🟩 Cashout</td>
+                        <td>Request withdrawal with receiving QR</td>
+                        <td>Account assigned; sufficient balance</td>
+                    </tr>
+                    <tr>
+                        <td>🎮 Change Game</td>
+                        <td>Switch to a different active game</td>
+                        <td>Must be ACTIVE status</td>
+                    </tr>
+                </tbody>
+            </table>
+            
+            <h3>Load Balance Flow (ONE MESSAGE ONLY)</h3>
+            <div class="approval-flow">
+                <strong>⚠️ CRITICAL: This flow edits a SINGLE message. NO extra bot messages are sent.</strong>
+                <div class="approval-step">
+                    <span class="emoji">1️⃣</span> <strong>Step 1:</strong> Bot displays payment QR + asks for username
+                </div>
+                <div class="approval-step">
+                    <span class="emoji">2️⃣</span> <strong>Step 2:</strong> Bot EDITS message → asks for amount
+                </div>
+                <div class="approval-step">
+                    <span class="emoji">3️⃣</span> <strong>Step 3:</strong> Bot EDITS message → user clicks "I Have Paid"
+                </div>
+                <div class="approval-step">
+                    <span class="emoji">4️⃣</span> <strong>Step 4:</strong> Bot EDITS message → asks for payment screenshot
+                </div>
+                <div class="approval-step">
+                    <span class="emoji">⏳</span> <strong>Processing:</strong> Bot EDITS message → shows "PENDING" status
+                </div>
+                <div class="approval-step">
+                    <span class="emoji">✅/❌</span> <strong>Result:</strong> Bot EDITS message → shows "APPROVED" or "REJECTED"
+                </div>
+            </div>
+            
+            <h3>Cashout Flow (ONE MESSAGE ONLY)</h3>
+            <div class="approval-flow">
+                <strong>⚠️ CRITICAL: This flow edits a SINGLE message. NO extra bot messages are sent.</strong>
+                <div class="approval-step">
+                    <span class="emoji">1️⃣</span> <strong>Step 1:</strong> Bot asks for username
+                </div>
+                <div class="approval-step">
+                    <span class="emoji">2️⃣</span> <strong>Step 2:</strong> Bot EDITS message → asks for amount
+                </div>
+                <div class="approval-step">
+                    <span class="emoji">3️⃣</span> <strong>Step 3:</strong> Bot EDITS message → asks for cashtag
+                </div>
+                <div class="approval-step">
+                    <span class="emoji">4️⃣</span> <strong>Step 4:</strong> Bot EDITS message → asks for receiving QR
+                </div>
+                <div class="approval-step">
+                    <span class="emoji">⏳</span> <strong>Processing:</strong> Bot EDITS message → shows "PENDING" status
+                </div>
+                <div class="approval-step">
+                    <span class="emoji">✅/❌</span> <strong>Result:</strong> Bot EDITS message → shows "APPROVED" or "REJECTED"
+                </div>
+            </div>
+        </div>
+
+        <!-- SECTION 5 -->
+        <h2>5️⃣ Admin Commands</h2>
+        <div class="section">
+            <p><strong>Note:</strong> All admin commands must be issued in the <strong>admin supergroup</strong> (specific topic). Private chat commands are <strong>NOT</strong> supported for admins.</p>
+            
+            <h3 style="color: #dc2626; margin-top: 30px;">Command 1: /promo</h3>
+            <div class="command-block">
+                <div class="command-name">📣 Broadcast Promotion to All Users</div>
+                <p><strong>Location:</strong> PROMOTIONS topic only</p>
+                <p><strong>Access:</strong> Administrators only</p>
+                
+                <div class="usage">
+                    <strong>Usage Method 1: Inline Arguments</strong><br/>
+                    <code>/promo Hello everyone! New Game X is LIVE!</code><br/><br/>
+                    The promotion text is sent immediately to all known users.
+                </div>
+                
+                <div class="usage">
+                    <strong>Usage Method 2: Follow-up Message</strong><br/>
+                    Type <code>/promo</code> (without text)<br/>
+                    Bot will ask you to send the promotion text as your next message<br/>
+                    Send the text, and it broadcasts immediately
+                </div>
+                
+                <h4 style="margin-top: 15px;">Step-by-Step Example:</h4>
+                <div class="step">
+                    <span class="step-number">1</span> Navigate to <strong>PROMOTIONS</strong> topic in admin supergroup
+                </div>
+                <div class="step">
+                    <span class="step-number">2</span> Type: <code>/promo</code>
+                </div>
+                <div class="step">
+                    <span class="step-number">3</span> Bot replies: "Send the promotion text as your next message"
+                </div>
+                <div class="step">
+                    <span class="step-number">4</span> Send your promotion message
+                </div>
+                <div class="step">
+                    <span class="step-number">5</span> Bot broadcasts to all users + logs to PROMOTIONS topic
+                </div>
+                
+                <h4 style="margin-top: 15px;">Result Logging:</h4>
+                <ul>
+                    <li>✅ Successfully sent to N users</li>
+                    <li>⚠️ Blocked/failed count tracked</li>
+                    <li>📝 Full promotion text logged</li>
+                </ul>
+                
+                <div class="warning">
+                    <strong>⚠️ Note:</strong> If users have blocked the bot, they won't receive the promotion. Count of blocked users is logged.
+                </div>
+            </div>
+
+            <h3 style="color: #dc2626; margin-top: 30px;">Command 2: /msguser</h3>
+            <div class="command-block">
+                <div class="command-name">✉️ Send Direct Message to Specific User</div>
+                <p><strong>Location:</strong> ADMIN_USER_MSGS topic only</p>
+                <p><strong>Access:</strong> Administrators only</p>
+                
+                <div class="usage">
+                    <strong>Usage Method 1: Inline Arguments</strong><br/>
+                    <code>/msguser 123456789 Your account has been approved!</code><br/><br/>
+                    Sends message immediately to user ID 123456789.
+                </div>
+                
+                <div class="usage">
+                    <strong>Usage Method 2: Interactive Steps</strong><br/>
+                    Type <code>/msguser</code> (without arguments)<br/>
+                    Bot will ask for User ID, then message text in follow-up messages
+                </div>
+                
+                <h4 style="margin-top: 15px;">Step-by-Step Example:</h4>
+                <div class="step">
+                    <span class="step-number">1</span> Navigate to <strong>ADMIN_USER_MSGS</strong> topic in admin supergroup
+                </div>
+                <div class="step">
+                    <span class="step-number">2</span> Type: <code>/msguser</code>
+                </div>
+                <div class="step">
+                    <span class="step-number">3</span> Bot replies: "Step 1 / 2: Send the User ID as your next message"
+                </div>
+                <div class="step">
+                    <span class="step-number">4</span> Send the numeric user ID (e.g., <code>123456789</code>)
+                </div>
+                <div class="step">
+                    <span class="step-number">5</span> Bot replies: "Step 2 / 2: Send the message text"
+                </div>
+                <div class="step">
+                    <span class="step-number">6</span> Send your message text
+                </div>
+                <div class="step">
+                    <span class="step-number">7</span> Bot sends message to user + logs result
+                </div>
+                
+                <h4 style="margin-top: 15px;">How to Find User ID:</h4>
+                <ul>
+                    <li>User ID appears in approval requests (LOAD_APPROVALS / WITHDRAW_APPROVALS topics)</li>
+                    <li>Check TRANSACTION_LOGS for past user IDs</li>
+                    <li>Forward a message from the user to a bot that shows user info</li>
+                </ul>
+                
+                <div class="warning">
+                    <strong>⚠️ Important:</strong> User must have interacted with the bot before (via /start). Otherwise, message delivery will fail.
+                </div>
+            </div>
+        </div>
+
+        <!-- SECTION 6 -->
+        <h2>6️⃣ Game Management</h2>
+        <div class="section">
+            <h3>Creating Games</h3>
+            <p>Games can be created two ways:</p>
+            
+            <h4 style="margin-top: 20px;">Method 1: Default Games (Automatic)</h4>
+            <p>On first bot startup, three default games are automatically created in MANAGE_GAMES topic:</p>
+            <ul>
+                <li>Game A (ACTIVE)</li>
+                <li>Game B (ACTIVE)</li>
+                <li>Game C (DISABLED)</li>
+            </ul>
+            
+            <h4 style="margin-top: 20px;">Method 2: Admin Posts New Game</h4>
+            <p>To add a new game:</p>
+            <div class="step">
+                <span class="step-number">1</span> Go to <strong>MANAGE_GAMES</strong> topic
+            </div>
+            <div class="step">
+                <span class="step-number">2</span> Post a message with format:<br/>
+                <code style="background: #e0e7ff; padding: 4px 8px; border-radius: 3px; display: inline-block; margin-top: 5px;">GAME | id=GameD | name=Game D | status=ACTIVE</code>
+            </div>
+            <div class="step">
+                <span class="step-number">3</span> Bot ingests it and creates canonical bot-sent record
+            </div>
+            <div class="step">
+                <span class="step-number">4</span> Control buttons appear for admins (Enable/Disable/Archive)
+            </div>
+            
+            <h3 style="margin-top: 25px;">Changing Game Status</h3>
+            <p>Use inline buttons in MANAGE_GAMES topic:</p>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Button</th>
+                        <th>Current Status</th>
+                        <th>New Status</th>
+                        <th>Effect</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td>✅ Enable</td>
+                        <td>DISABLED or ARCHIVED</td>
+                        <td>ACTIVE</td>
+                        <td>Game visible to users; can register accounts</td>
+                    </tr>
+                    <tr>
+                        <td>🚫 Disable</td>
+                        <td>ACTIVE</td>
+                        <td>DISABLED</td>
+                        <td>Hidden from users; no new registrations</td>
+                    </tr>
+                    <tr>
+                        <td>🗄 Archive</td>
+                        <td>ACTIVE or DISABLED</td>
+                        <td>ARCHIVED</td>
+                        <td>Permanently hidden; kept for record</td>
+                    </tr>
+                </tbody>
+            </table>
+            
+            <div class="info">
+                <strong>💡 Tip:</strong> Only <strong>ACTIVE</strong> games appear in the user game picker. Disabled/Archived games are hidden.
+            </div>
+            
+            <h3 style="margin-top: 25px;">Game Format Reference</h3>
+            <p>When creating/updating games, use this exact format:</p>
+            <div style="background: #1e293b; color: #e2e8f0; padding: 15px; border-radius: 4px; font-family: 'Courier New', monospace; margin: 15px 0;">
+GAME | id=GAMEID | name=Game Name | status=STATUS
+            </div>
+            <ul>
+                <li><code>id</code>: Unique identifier (no spaces, alphanumeric + underscore)</li>
+                <li><code>name</code>: Display name for users</li>
+                <li><code>status</code>: One of ACTIVE, DISABLED, ARCHIVED</li>
+            </ul>
+        </div>
+
+        <!-- SECTION 7 -->
+        <h2>7️⃣ Approval Workflows</h2>
+        <div class="section">
+            <h3>Load Balance Approval Process</h3>
+            <div class="approval-flow">
+                <div class="approval-step">
+                    <span class="emoji">1️⃣</span> <strong>User Submits:</strong> User completes Load flow, bot sends payment screenshot to LOAD_APPROVALS topic with approval buttons
+                </div>
+                <div class="approval-step">
+                    <span class="emoji">2️⃣</span> <strong>Admin Reviews:</strong> Admin sees photo + request details (username, amount, user ID, request ID)
+                </div>
+                <div class="approval-step">
+                    <span class="emoji">3️⃣</span> <strong>Admin Decides:</strong> Click <strong>✅ Approve</strong> or <strong>❌ Reject</strong>
+                </div>
+                <div class="approval-step">
+                    <span class="emoji">4️⃣</span> <strong>If Approve:</strong> Bot logs decision, edits user's message to show "APPROVED", removes buttons
+                </div>
+                <div class="approval-step">
+                    <span class="emoji">5️⃣</span> <strong>If Reject:</strong> Admin enters rejection reason, bot logs it, edits user's message to show "REJECTED" + reason
+                </div>
+            </div>
+            
+            <h3 style="margin-top: 25px;">Cashout Approval Process</h3>
+            <div class="approval-flow">
+                <div class="approval-step">
+                    <span class="emoji">1️⃣</span> <strong>User Submits:</strong> User completes Cashout flow, bot sends receiving QR to WITHDRAW_APPROVALS topic with approval buttons
+                </div>
+                <div class="approval-step">
+                    <span class="emoji">2️⃣</span> <strong>Admin Reviews:</strong> Admin sees photo/document + request details (username, amount, cashtag, user ID, request ID)
+                </div>
+                <div class="approval-step">
+                    <span class="emoji">3️⃣</span> <strong>Admin Decides:</strong> Click <strong>✅ Approve</strong> or <strong>❌ Reject</strong>
+                </div>
+                <div class="approval-step">
+                    <span class="emoji">4️⃣</span> <strong>If Approve:</strong> Bot logs decision, edits user's message to show "APPROVED", removes buttons
+                </div>
+                <div class="approval-step">
+                    <span class="emoji">5️⃣</span> <strong>If Reject:</strong> Admin enters rejection reason in the same topic, bot logs it, edits user's message
+                </div>
+            </div>
+            
+            <h3 style="margin-top: 25px;">How to Reject with Reason</h3>
+            <p><strong>When you click ❌ Reject:</strong></p>
+            <div class="step">
+                <span class="step-number">1</span> Bot changes message to "Enter rejection reason"
+            </div>
+            <div class="step">
+                <span class="step-number">2</span> Send your reason as the next message in the same topic
+            </div>
+            <div class="step">
+                <span class="step-number">3</span> Bot logs the rejection, sends reason to user, removes buttons
+            </div>
+            
+            <div class="warning">
+                <strong>⚠️ Important:</strong> Your rejection reason message must be in the SAME topic thread as the approval request.
+            </div>
+            
+            <h3 style="margin-top: 25px;">Request ID Tracking</h3>
+            <p>Each load/cashout request gets a unique ID format:</p>
+            <ul>
+                <li><strong>Load Requests:</strong> Start with 'L' (e.g., <code>La1b2c3d4</code>)</li>
+                <li><strong>Cashout Requests:</strong> Start with 'C' (e.g., <code>Ca5e6f7g8</code>)</li>
+            </ul>
+            <p style="margin-top: 10px;">Use these IDs to look up transactions in TRANSACTION_LOGS topic.</p>
+        </div>
+
+        <!-- SECTION 8 -->
+        <h2>8️⃣ Inventory Management</h2>
+        <div class="section">
+            <h3>Adding Game Accounts to Inventory</h3>
+            <p>Accounts are added to the ACCOUNT_INVENTORY topic:</p>
+            
+            <div class="step">
+                <span class="step-number">1</span> Navigate to <strong>ACCOUNT_INVENTORY</strong> topic
+            </div>
+            <div class="step">
+                <span class="step-number">2</span> Post message with format:<br/>
+                <code style="background: #e0e7ff; padding: 4px 8px; border-radius: 3px; display: inline-block; margin-top: 5px;">ACCOUNT | game=GameA | username=user123 | password=pass456 | status=AVAILABLE</code>
+            </div>
+            <div class="step">
+                <span class="step-number">3</span> Bot creates canonical bot-sent record for FIFO assignment
+            </div>
+            <div class="step">
+                <span class="step-number">4</span> Account becomes available for users to register
+            </div>
+            
+            <h3 style="margin-top: 25px;">Account Format Reference</h3>
+            <div style="background: #1e293b; color: #e2e8f0; padding: 15px; border-radius: 4px; font-family: 'Courier New', monospace; margin: 15px 0;">
+ACCOUNT | game=GAMEID | username=USERNAME | password=PASSWORD | status=STATUS
+            </div>
+            <ul>
+                <li><code>game</code>: Game ID (must match a created game)</li>
+                <li><code>username</code>: Account login username</li>
+                <li><code>password</code>: Account login password</li>
+                <li><code>status</code>: AVAILABLE (can also be ASSIGNED after registration)</li>
+            </ul>
+            
+            <h3 style="margin-top: 25px;">Account Assignment (Automatic)</h3>
+            <p>When a user registers:</p>
+            <ol>
+                <li>Bot checks user email (must be collected first)</li>
+                <li>Bot takes first AVAILABLE account from FIFO queue for that game</li>
+                <li>Bot EDITS the inventory message to mark status=ASSIGNED</li>
+                <li>Logs assignment to TRANSACTION_LOGS</li>
+                <li>Account no longer available for other users</li>
+            </ol>
+            
+            <div class="success">
+                <strong>✅ FIFO Guarantee:</strong> Accounts are assigned in the order they were added. First user to register gets first account.
+            </div>
+            
+            <h3 style="margin-top: 25px;">Checking Inventory Status</h3>
+            <p>View ACCOUNT_INVENTORY topic to see:</p>
+            <ul>
+                <li>✅ AVAILABLE accounts: Ready for registration</li>
+                <li>🔒 ASSIGNED accounts: Shows assigned user ID and timestamp</li>
+                <li>📊 Total count per game</li>
+            </ul>
+            
+            <div class="warning">
+                <strong>⚠️ Never Delete Messages:</strong> Inventory messages are never deleted, only edited. This maintains audit trail.
+            </div>
+        </div>
+
+        <!-- SECTION 9 -->
+        <h2>9️⃣ Payment Configuration</h2>
+        <div class="section">
+            <h3>Setting Up Payment QR Codes</h3>
+            <p>Payment QR codes are configured per game in the PAYMENT_CONFIG topic:</p>
+            
+            <div class="step">
+                <span class="step-number">1</span> Navigate to <strong>PAYMENT_CONFIG</strong> topic
+            </div>
+            <div class="step">
+                <span class="step-number">2</span> Upload photo or document with caption:<br/>
+                <code style="background: #e0e7ff; padding: 4px 8px; border-radius: 3px; display: inline-block; margin-top: 5px;">PAYMENT_QR | game=GameA</code>
+            </div>
+            <div class="step">
+                <span class="step-number">3</span> Bot stores this as canonical payment QR for GameA
+            </div>
+            <div class="step">
+                <span class="step-number">4</span> When users load balance, bot displays this QR in their flow
+            </div>
+            
+            <h3 style="margin-top: 25px;">Updating Payment QR</h3>
+            <p>To change a game's payment QR:</p>
+            <ol>
+                <li>Go to PAYMENT_CONFIG topic</li>
+                <li>Upload the new QR image/document with caption <code>PAYMENT_QR | game=GameA</code></li>
+                <li>Bot automatically replaces the old QR with the new one</li>
+            </ol>
+            
+            <h3 style="margin-top: 25px;">Supported Formats</h3>
+            <ul>
+                <li>✅ Photo (PNG, JPG) - displayed inline in user's load flow</li>
+                <li>✅ Document (PDF, etc.) - downloadable in user's flow</li>
+            </ul>
+            
+            <div class="info">
+                <strong>💡 Important:</strong> If a game has no payment QR configured, users cannot load balance for that game. Configure QR before making game ACTIVE.
+            </div>
+        </div>
+
+        <!-- SECTION 10 -->
+        <h2>🔟 System Monitoring & Maintenance</h2>
+        <div class="section">
+            <h3>Monitoring System Health</h3>
+            <p>Check these topics regularly:</p>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Topic</th>
+                        <th>What to Monitor</th>
+                        <th>Action if Issue</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td>TRANSACTION_LOGS</td>
+                        <td>Frequency of operations (should see regular activity)</td>
+                        <td>If no activity for hours, check bot status</td>
+                    </tr>
+                    <tr>
+                        <td>LOAD_APPROVALS</td>
+                        <td>Pending requests waiting for approval</td>
+                        <td>Approve/reject promptly to keep users happy</td>
+                    </tr>
+                    <tr>
+                        <td>WITHDRAW_APPROVALS</td>
+                        <td>Pending cashout requests</td>
+                        <td>Approve/reject promptly</td>
+                    </tr>
+                    <tr>
+                        <td>EMAIL_LOGS</td>
+                        <td>New users providing email addresses</td>
+                        <td>Monitor for unusual activity</td>
+                    </tr>
+                    <tr>
+                        <td>ACCOUNT_INVENTORY</td>
+                        <td>Running low on AVAILABLE accounts?</td>
+                        <td>Add more accounts before inventory empties</td>
+                    </tr>
+                </tbody>
+            </table>
+            
+            <h3 style="margin-top: 25px;">Automatic Backups</h3>
+            <p>The system automatically creates state snapshots:</p>
+            <ul>
+                <li>⏱️ Every 15 minutes (periodic automatic)</li>
+                <li>📝 After each major operation (game change, account assignment, approval)</li>
+                <li>💾 Stored in SYSTEM_BACKUPS topic</li>
+                <li>📌 Latest snapshot is pinned to the chat</li>
+            </ul>
+            
+            <h3 style="margin-top: 25px;">Recovery on Bot Restart</h3>
+            <p>When the bot restarts:</p>
+            <ol>
+                <li>Bot fetches pinned message from admin group</li>
+                <li>Extracts state snapshot from SYSTEM_BACKUPS topic</li>
+                <li>Rehydrates all Maps (games, accounts, users, payments, etc.)</li>
+                <li>Continues operation without data loss</li>
+            </ol>
+            
+            <div class="success">
+                <strong>✅ Zero Data Loss:</strong> Telegram is the source of truth. State is always recoverable.
+            </div>
+            
+            <h3 style="margin-top: 25px;">Bot Logs (Server Side)</h3>
+            <p>Bot writes logs to console. Check server logs for:</p>
+            <ul>
+                <li>⚠️ Error messages (if any operations fail)</li>
+                <li>✅ Startup confirmation (bot is running)</li>
+                <li>📊 Operation counts</li>
+            </ul>
+            
+            <h3 style="margin-top: 25px;">Email Validation</h3>
+            <p>Email collection is mandatory for first-time account registration:</p>
+            <ul>
+                <li>Bot validates email format (basic regex check)</li>
+                <li>Rejected emails: user prompted to re-enter</li>
+                <li>Accepted emails logged to EMAIL_LOGS topic</li>
+                <li>Email stored in user's session (in-memory)</li>
+            </ul>
+            
+            <h3 style="margin-top: 25px;">User Blocking Handling</h3>
+            <p>If users block the bot:</p>
+            <ul>
+                <li>❌ Promotions fail to deliver (counted in logs)</li>
+                <li>❌ Admin messages fail (error logged)</li>
+                <li>⚠️ User can still interact if they unblock</li>
+            </ul>
+        </div>
+
+        <!-- QUICK REFERENCE -->
+        <h2>⚡ Quick Reference Card</h2>
+        <div class="section">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Task</th>
+                        <th>Location</th>
+                        <th>Action</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td>Create Game</td>
+                        <td>MANAGE_GAMES topic</td>
+                        <td>Post <code>GAME | id=X | name=Y | status=ACTIVE</code></td>
+                    </tr>
+                    <tr>
+                        <td>Enable/Disable Game</td>
+                        <td>MANAGE_GAMES topic</td>
+                        <td>Click game control button</td>
+                    </tr>
+                    <tr>
+                        <td>Add Accounts</td>
+                        <td>ACCOUNT_INVENTORY topic</td>
+                        <td>Post <code>ACCOUNT | game=X | username=Y | password=Z | status=AVAILABLE</code></td>
+                    </tr>
+                    <tr>
+                        <td>Set Payment QR</td>
+                        <td>PAYMENT_CONFIG topic</td>
+                        <td>Upload image with caption <code>PAYMENT_QR | game=X</code></td>
+                    </tr>
+                    <tr>
+                        <td>Approve Load</td>
+                        <td>LOAD_APPROVALS topic</td>
+                        <td>Click ✅ Approve button</td>
+                    </tr>
+                    <tr>
+                        <td>Reject Load</td>
+                        <td>LOAD_APPROVALS topic</td>
+                        <td>Click ❌ Reject, then send reason message</td>
+                    </tr>
+                    <tr>
+                        <td>Approve Cashout</td>
+                        <td>WITHDRAW_APPROVALS topic</td>
+                        <td>Click ✅ Approve button</td>
+                    </tr>
+                    <tr>
+                        <td>Reject Cashout</td>
+                        <td>WITHDRAW_APPROVALS topic</td>
+                        <td>Click ❌ Reject, then send reason message</td>
+                    </tr>
+                    <tr>
+                        <td>Broadcast Promo</td>
+                        <td>PROMOTIONS topic</td>
+                        <td>Type <code>/promo</code> + text or send text after</td>
+                    </tr>
+                    <tr>
+                        <td>Send DM to User</td>
+                        <td>ADMIN_USER_MSGS topic</td>
+                        <td>Type <code>/msguser USER_ID</code> + message</td>
+                    </tr>
+                    <tr>
+                        <td>View All Logs</td>
+                        <td>TRANSACTION_LOGS topic</td>
+                        <td>Read chronological log of all operations</td>
+                    </tr>
+                    <tr>
+                        <td>View Backups</td>
+                        <td>SYSTEM_BACKUPS topic</td>
+                        <td>Check pinned snapshot (do not edit)</td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+
+        <!-- TROUBLESHOOTING -->
+        <h2>🔧 Troubleshooting</h2>
+        <div class="section">
+            <h3>Bot Not Responding</h3>
+            <ul>
+                <li><strong>Check:</strong> Is bot still in admin supergroup?</li>
+                <li><strong>Check:</strong> Server logs for errors</li>
+                <li><strong>Fix:</strong> Restart bot process</li>
+                <li><strong>Recovery:</strong> State will be restored from pinned snapshot</li>
+            </ul>
+            
+            <h3>User Can't Register Account</h3>
+            <ul>
+                <li><strong>Cause 1:</strong> No AVAILABLE accounts in inventory</li>
+                <li><strong>Fix:</strong> Add more accounts to ACCOUNT_INVENTORY topic</li>
+                <li><strong>Cause 2:</strong> User hasn't provided email yet</li>
+                <li><strong>Fix:</strong> User must click "Register" again and provide email</li>
+            </ul>
+            
+            <h3>Payment QR Not Showing to User</h3>
+            <ul>
+                <li><strong>Cause:</strong> No PAYMENT_QR configured for that game</li>
+                <li><strong>Fix:</strong> Go to PAYMENT_CONFIG topic, upload QR with <code>PAYMENT_QR | game=X</code> caption</li>
+            </ul>
+            
+            <h3>Approval Messages Not Appearing</h3>
+            <ul>
+                <li><strong>Check:</strong> User's payment screenshot was received?</li>
+                <li><strong>Check:</strong> LOAD_APPROVALS topic exists and is accessible?</li>
+                <li><strong>Fix:</strong> Verify bot is admin in supergroup</li>
+            </ul>
+            
+            <h3>Promotion Not Sent to Users</h3>
+            <ul>
+                <li><strong>Check:</strong> Were users blocked?</li>
+                <li><strong>Check:</strong> PROMOTIONS topic logs for delivery count</li>
+                <li><strong>Note:</strong> Blocked users won't receive; this is logged</li>
+            </ul>
+        </div>
+
+        <!-- BEST PRACTICES -->
+        <h2>✅ Best Practices</h2>
+        <div class="section">
+            <h3>Regular Maintenance</h3>
+            <ul>
+                <li>✅ Check LOAD_APPROVALS & WITHDRAW_APPROVALS daily for pending requests</li>
+                <li>✅ Approve/reject requests within 1-2 hours (keep users happy)</li>
+                <li>✅ Monitor ACCOUNT_INVENTORY inventory levels</li>
+                <li>✅ Review TRANSACTION_LOGS weekly for suspicious activity</li>
+            </ul>
+            
+            <h3>Game Management</h3>
+            <ul>
+                <li>✅ Always set PAYMENT_QR BEFORE making game ACTIVE</li>
+                <li>✅ Use clear, user-friendly game names</li>
+                <li>✅ Archive old games (don't delete for audit trail)</li>
+            </ul>
+            
+            <h3>Account Inventory</h3>
+            <ul>
+                <li>✅ Add accounts in batches (e.g., 10 at a time)</li>
+                <li>✅ Keep extra buffer (don't let inventory hit zero)</li>
+                <li>✅ Use strong passwords (or at least meaningful ones)</li>
+            </ul>
+            
+            <h3>Admin Communication</h3>
+            <ul>
+                <li>✅ Always give clear rejection reasons (helps users understand)</li>
+                <li>✅ Use promotions sparingly (avoid spam)</li>
+                <li>✅ Keep logs clean (no test messages in topics)</li>
+            </ul>
+            
+            <h3>Security</h3>
+            <ul>
+                <li>✅ Only admins can see approval topics (restrict supergroup access)</li>
+                <li>✅ Never share payment QR outside supergroup</li>
+                <li>✅ Review email logs occasionally (unusual addresses?)</li>
+            </ul>
+        </div>
+
+        <!-- GLOSSARY -->
+        <h2>📚 Glossary</h2>
+        <div class="section">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Term</th>
+                        <th>Definition</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td><strong>Forum Topic</strong></td>
+                        <td>A thread-like feature in Telegram supergroups. Each topic is isolated (like a "table" in database). We use 10 topics for different data types.</td>
+                    </tr>
+                    <tr>
+                        <td><strong>FIFO</strong></td>
+                        <td>First In, First Out. Accounts are assigned in the order they were added.</td>
+                    </tr>
+                    <tr>
+                        <td><strong>Canonical Message</strong></td>
+                        <td>A bot-sent message that serves as the source of truth. Always editable, never deleted.</td>
+                    </tr>
+                    <tr>
+                        <td><strong>Snapshot</strong></td>
+                        <td>Complete state backup (all games, accounts, users, payments). Saved every 15 minutes.</td>
+                    </tr>
+                    <tr>
+                        <td><strong>Single-Message Flow</strong></td>
+                        <td>Load & Cashout flows that edit ONE message multiple times instead of sending new messages.</td>
+                    </tr>
+                    <tr>
+                        <td><strong>Polling</strong></td>
+                        <td>Bot periodically checks for new messages (every 300ms) instead of waiting for webhooks.</td>
+                    </tr>
+                    <tr>
+                        <td><strong>User ID</strong></td>
+                        <td>Unique numeric identifier for each Telegram user. Used to identify who approved what.</td>
+                    </tr>
+                    <tr>
+                        <td><strong>Request ID</strong></td>
+                        <td>Unique identifier for each load/cashout request (starts with L or C). Used for tracking.</td>
+                    </tr>
+                    <tr>
+                        <td><strong>Admin Verification</strong></td>
+                        <td>System checks if user is admin via getChatMember. Must be administrator or creator in supergroup.</td>
+                    </tr>
+                    <tr>
+                        <td><strong>Inline Keyboard</strong></td>
+                        <td>Button menu shown below a message. Only UI element type allowed (no reply keyboards).</td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+
+        <footer>
+            <p><strong>Telegram Game Account Manager Bot - Admin SOP</strong></p>
+            <p>Version 1.0 | Generated: January 31, 2026</p>
+            <p>For technical issues, contact the development team.</p>
+        </footer>
+    </div>
+</body>
+</html>

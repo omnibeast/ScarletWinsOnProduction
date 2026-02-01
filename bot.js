@@ -1,722 +1,2168 @@
+/* eslint-disable no-console */
+"use strict";
+
 /**
- * Production-ready Telegram bot (polling) using node-telegram-bot-api
- * - Private chat user flow with inline buttons
- * - Admin group acts as database (accounts + requests are messages in group)
- * - In-memory state per user via Map()
- * - Mirrors state into admin group messages and edits them to reflect status
+ * TELEGRAM GAME ACCOUNT MANAGER BOT - PRODUCTION READY
  *
- * IMPORTANT:
- * - Bot MUST be admin in the admin group to read messages reliably and to edit messages.
- * - Accounts are stored as admin-group messages with a strict format (see ACCOUNT line below).
+ * Tech Stack: Node.js + node-telegram-bot-api
+ * Polling Mode ONLY (no webhooks, no Mini Apps)
+ * Single File: bot.js
+ * Persistence: Telegram messages in Forum Topics + in-memory Maps
+ * Source of Truth: Telegram messages (never deleted, only edited)
+ *
+ * CORE ARCHITECTURE:
+ * - ONE Telegram supergroup with Forum Topics enabled
+ * - Each topic acts as a database table
+ * - Bot must be ADMIN in the group
+ * - Inline keyboards ONLY (no reply keyboards)
+ * - ALL persistence via SYSTEM_BACKUPS topic snapshots
+ * - On restart: restore from pinned snapshot message
+ *
+ * FLOW RULES:
+ * - Load Balance: ONE message ONLY (edit throughout flow)
+ * - Cashout: ONE message ONLY (edit throughout flow)
+ * - No new messages until flow complete
+ * - All actions auditable
  */
 
+// =========================
+// CONFIG (PLACEHOLDERS ONLY)
+// =========================
 const TelegramBot = require("node-telegram-bot-api");
 
-// ===================== CONFIG =====================
 const BOT_TOKEN = process.env.BOT_TOKEN || "8370829137:AAGT2UrtcfpJp136LxNvIFvLjvt4VLW_j2M";
+const ADMIN_GROUP_ID = Number(process.env.ADMIN_GROUP_ID || "-1003733011913");
 
-// Your admin group chat id, e.g. -1001234567890
-const ADMIN_GROUP_ID = Number(process.env.ADMIN_GROUP_ID || "-1003579950450");
+const TOPIC_THREAD_IDS = {
+  ACCOUNT_INVENTORY: 4,
+  LOAD_APPROVALS: 6,
+  WITHDRAW_APPROVALS: 8,
+  TRANSACTION_LOGS: 10,
+  EMAIL_LOGS: 12,
+  PROMOTIONS: 2,
+  MANAGE_GAMES: 20,
+  PAYMENT_CONFIG: 57,
+  ADMIN_USER_MSGS: 59,
+  SYSTEM_BACKUPS: 92,
+};
 
-// Admin user IDs (optional hardening).
-// If empty, bot will rely on Telegram "administrator/creator" status checks in the group.
-const ADMIN_USER_IDS = (process.env.ADMIN_USER_IDS || "")
-  .split(",")
-  .map(s => s.trim())
-  .filter(Boolean)
-  .map(Number);
-
-// Games shown to users (buttons + stored as IDs)
-const GAMES = [
-  { id: "GameA", label: "Game A" },
-  { id: "GameB", label: "Game B" },
-  { id: "GameC", label: "Game C" },
+// =========================
+// GAME SYSTEM (FIXED)
+// =========================
+const DEFAULT_GAMES = [
+  { id: "GameA", name: "Game A", status: "ACTIVE" },
+  { id: "GameB", name: "Game B", status: "ACTIVE" },
+  { id: "GameC", name: "Game C", status: "DISABLED" },
 ];
 
-// Payment QR: use a Telegram file_id for a photo for best speed
-// You can also use a URL, but file_id is better.
-const PAYMENT_QR_FILE_ID = process.env.PAYMENT_QR_FILE_ID || null;
-
-// Account scanning limit when searching admin group history
-// Keep reasonable to avoid slowness.
-const ACCOUNT_SCAN_LIMIT = Number(process.env.ACCOUNT_SCAN_LIMIT || "200");
-
-// ===================== INIT =====================
-if (!BOT_TOKEN || BOT_TOKEN.includes("PUT_YOUR_BOT_TOKEN_HERE")) {
-  console.error("❌ Please set BOT_TOKEN in env or bot.js");
+// =========================
+// BOT INIT (POLLING ONLY)
+// =========================
+if (!BOT_TOKEN || BOT_TOKEN === "BOT_TOKEN") {
+  console.error("❌ BOT_TOKEN placeholder not set.");
   process.exit(1);
 }
 if (!ADMIN_GROUP_ID || Number.isNaN(ADMIN_GROUP_ID)) {
-  console.error("❌ Please set ADMIN_GROUP_ID (e.g. -100123...) in env or bot.js");
+  console.error("❌ ADMIN_GROUP_ID placeholder not set (must be numeric).");
   process.exit(1);
 }
 
 const bot = new TelegramBot(BOT_TOKEN, {
   polling: {
-    interval: 300,
     autoStart: true,
+    interval: 300,
     params: { timeout: 30 },
   },
 });
 
-// ===================== STATE =====================
-// Per-user state machine (private chat)
-const userState = new Map(); // userId -> session
+// =========================
+// CONSTANTS / LIMITS
+// =========================
+const SNAPSHOT_INTERVAL_MS = 15 * 60 * 1000; // periodic snapshots
+const ADMIN_CACHE_TTL_MS = 2 * 60 * 1000;
+// SNAPSHOT lines must contain JSON that can be parsed on restart.
 
-// Simple cache of admin group accounts (parsed from messages)
-// accountKey = `${game}|${username}`
-const accountCache = new Map(); // accountKey -> { game, username, password, status, assigned_to, message_id }
+// =========================
+// IN-MEMORY STATE (REHYDRATED)
+// =========================
+/** @type {number|null} */
+let BOT_ID = null;
+/** @type {string|null} */
+let BOT_USERNAME = null;
 
-// Pending approvals (requestId -> data)
-const pendingRequests = new Map(); // requestId -> { type, userId, game, username, amount, cashtag?, adminMsgId, photoFileId? }
+// Canonical records are always bot-sent messages in their topics (so we can edit them).
+// Admins can "add/update" by posting formatted messages; bot ingests and updates canonical bot messages.
 
-// ===================== UTIL =====================
-function isPrivateChat(msg) {
-  return msg.chat && msg.chat.type === "private";
-}
-function isAdminGroup(msg) {
-  return msg.chat && (msg.chat.id === ADMIN_GROUP_ID);
-}
+/** @type {Map<string, {id:string,name:string,status:"ACTIVE"|"DISABLED"|"ARCHIVED", message_id:number}>} */
+const gamesById = new Map();
 
-function nowIso() {
+/**
+ * Inventory by canonical message id.
+ * @type {Map<number, {game:string, username:string, password:string, status:"AVAILABLE"|"ASSIGNED", assigned_to?:number, assigned_at?:string}>}
+ */
+const accountsByMsgId = new Map();
+/** @type {Map<string, number[]>} gameId -> FIFO queue of AVAILABLE canonical inventory message_ids (sorted asc) */
+const availableQueueByGame = new Map();
+
+/**
+ * userKey = `${userId}::${gameId}`
+ * @type {Map<string, {inventory_message_id:number, username:string, password:string, assigned_at:string}>}
+ */
+const assignedByUserGame = new Map();
+
+/**
+ * Known users store selection + email in values (persists via snapshot in KnownUsers JSON).
+ * @type {Map<number, {user_id:number, username?:string, first_name?:string, last_name?:string, first_seen:string, last_seen:string, selected_game?:string|null, email?:string|null}>}
+ */
+const knownUsers = new Map();
+
+/**
+ * Payment QR config per game (canonical bot-sent message in PAYMENT_CONFIG topic).
+ * @type {Map<string, {game:string, type:"photo"|"document", file_id:string, message_id:number}>}
+ */
+const paymentQRs = new Map();
+
+/**
+ * Approval requests (ephemeral, restored via snapshot+inflight only).
+ * @type {Map<string, {
+ *   request_id:string,
+ *   type:"LOAD"|"CASHOUT",
+ *   game:string,
+ *   user_id:number,
+ *   username:string,
+ *   amount:number,
+ *   cashtag?:string,
+ *   created_at:string,
+ *   status:"PENDING"|"APPROVED"|"REJECTED",
+ *   decision_at?:string,
+ *   decision_by?:string,
+ *   reason?:string,
+ *   approvals_topic_message_id?:number,
+ *   approvals_topic_thread_id?:number,
+ *   user_flow_chat_id?:number,
+ *   user_flow_message_id?:number,
+ *   screenshot_file_id?:string,
+ *   receiving_qr_file_id?:string,
+ *   receiving_qr_type?: "photo"|"document"
+ * }>}
+ */
+const approvalRequests = new Map();
+
+// Private chat single-message flows
+/**
+ * @type {Map<number, {
+ *   kind:"LOAD"|"CASHOUT"|"EMAIL",
+ *   chat_id:number,
+ *   message_id:number,
+ *   step:string,
+ *   game?:string,
+ *   username?:string,
+ *   amount?:number,
+ *   cashtag?:string,
+ *   paid_screenshot_file_id?:string,
+ *   receiving_qr_file_id?:string,
+ *   receiving_qr_type?: "photo"|"document",
+ *   started_at:string,
+ *   request_id?:string
+ * }>}
+ */
+const userFlows = new Map();
+
+// Admin interactive states (reject reason, promo text, msguser steps)
+/**
+ * @type {Map<number, { kind:"REJECT_REASON", request_id:string, topic_thread_id:number, approvals_message_id:number } | { kind:"PROMO_TEXT" } | { kind:"MSGUSER_USERID" } | { kind:"MSGUSER_TEXT", target_user_id:number } >}
+ */
+const adminInputs = new Map();
+
+// Admin check cache
+/** @type {Map<number, { ok:boolean, checked_at:number }>} */
+const adminCheckCache = new Map();
+
+// =========================
+// UTILITIES
+// =========================
+function isoNow() {
   return new Date().toISOString();
 }
 
-function getSession(userId) {
-  if (!userState.has(userId)) {
-    userState.set(userId, {
-      step: "IDLE", // state step for text/photo capture
-      game: null,   // selected game id
-      flow: null,   // REGISTER | LOAD | CASHOUT
-      temp: {},     // stores username/amount/cashtag etc during flow
-      lastPromptMsgId: null,
-    });
+function isPrivate(msg) {
+  return msg?.chat?.type === "private";
+}
+
+function isGroup(msg) {
+  const t = msg?.chat?.type;
+  return t === "supergroup" || t === "group";
+}
+
+function isAdminGroupMessage(msg) {
+  return msg?.chat?.id === ADMIN_GROUP_ID;
+}
+
+function getThreadId(msg) {
+  return typeof msg?.message_thread_id === "number" ? msg.message_thread_id : null;
+}
+
+function safeText(s) {
+  return (s ?? "").toString();
+}
+
+function json(obj) {
+  return JSON.stringify(obj);
+}
+
+function validateTopicThreadIdsOrExit() {
+  const bad = [];
+  for (const [k, v] of Object.entries(TOPIC_THREAD_IDS)) {
+    if (!Number.isInteger(v) || v <= 0) bad.push(`${k}=${v}`);
   }
-  return userState.get(userId);
+  if (bad.length) {
+    console.error("❌ TOPIC_THREAD_IDS must be set to valid forum topic thread IDs (positive integers):");
+    for (const b of bad) console.error(`   - ${b}`);
+    process.exit(1);
+  }
 }
 
-function resetToMenu(userId) {
-  const s = getSession(userId);
-  s.step = "IDLE";
-  s.flow = null;
-  s.temp = {};
+function normalizeAmount(input) {
+  const n = Number(input);
+  if (!Number.isFinite(n)) return null;
+  if (n <= 0) return null;
+  return Math.round(n * 100) / 100;
 }
 
-function gameLabel(gameId) {
-  return (GAMES.find(g => g.id === gameId) || { label: gameId }).label;
+function validateEmail(email) {
+  const e = safeText(email).trim();
+  // Reasonably strict without being hostile.
+  return /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/i.test(e);
 }
 
-function buildGameKeyboard() {
+function makeUserGameKey(userId, gameId) {
+  return `${userId}::${gameId}`;
+}
+
+function shortUserLabel(user) {
+  const u = user?.username ? `@${user.username}` : null;
+  const name = [user?.first_name, user?.last_name].filter(Boolean).join(" ").trim();
+  return u || name || `user:${user?.id ?? "?"}`;
+}
+
+function adminIdentity(from) {
+  const uname = from?.username ? `@${from.username}` : null;
+  const name = [from?.first_name, from?.last_name].filter(Boolean).join(" ").trim();
+  const label = uname || name || `id:${from?.id ?? "?"}`;
+  return `${label} (${from?.id ?? "?"})`;
+}
+
+function mustBeTopic(msg, threadIdExpected) {
+  return isAdminGroupMessage(msg) && getThreadId(msg) === threadIdExpected;
+}
+
+function cb(parts) {
+  return parts.join("|").slice(0, 64);
+}
+
+function parseCb(data) {
+  return safeText(data).split("|");
+}
+
+async function answerCb(id, text) {
+  try {
+    await bot.answerCallbackQuery(id, { text: safeText(text).slice(0, 200) });
+  } catch {
+    // ignore
+  }
+}
+
+async function answerCbAlert(id, text) {
+  try {
+    await bot.answerCallbackQuery(id, { text: safeText(text).slice(0, 200), show_alert: true });
+  } catch {
+    // ignore
+  }
+}
+
+async function withRetry(fn) {
+  try {
+    return await fn();
+  } catch (e) {
+    const retryAfter = e?.response?.body?.parameters?.retry_after;
+    if (typeof retryAfter === "number" && retryAfter > 0 && retryAfter < 60) {
+      await new Promise(r => setTimeout(r, (retryAfter + 1) * 1000));
+      return await fn();
+    }
+    throw e;
+  }
+}
+
+async function safeEditText(chatId, messageId, text, replyMarkup) {
+  try {
+    return await withRetry(() =>
+      bot.editMessageText(text, {
+        chat_id: chatId,
+        message_id: messageId,
+        parse_mode: "HTML",
+        disable_web_page_preview: true,
+        reply_markup: replyMarkup || undefined,
+      }),
+    );
+  } catch (e) {
+    const m = safeText(e?.message);
+    if (m.includes("message is not modified")) return null;
+    console.warn("editMessageText failed:", m);
+    return null;
+  }
+}
+
+async function safeEditCaption(chatId, messageId, caption, replyMarkup) {
+  try {
+    return await withRetry(() =>
+      bot.editMessageCaption(caption, {
+        chat_id: chatId,
+        message_id: messageId,
+        parse_mode: "HTML",
+        reply_markup: replyMarkup || undefined,
+      }),
+    );
+  } catch (e) {
+    const m = safeText(e?.message);
+    if (m.includes("message is not modified")) return null;
+    console.warn("editMessageCaption failed:", m);
+    return null;
+  }
+}
+
+async function safeEditMedia(chatId, messageId, media, replyMarkup) {
+  try {
+    return await withRetry(() =>
+      bot.editMessageMedia(media, {
+        chat_id: chatId,
+        message_id: messageId,
+        reply_markup: replyMarkup || undefined,
+      }),
+    );
+  } catch (e) {
+    const m = safeText(e?.message);
+    if (m.includes("message is not modified")) return null;
+    console.warn("editMessageMedia failed:", m);
+    return null;
+  }
+}
+
+async function safeEditReplyMarkup(chatId, messageId, replyMarkup) {
+  try {
+    return await withRetry(() =>
+      bot.editMessageReplyMarkup(replyMarkup || { inline_keyboard: [] }, {
+        chat_id: chatId,
+        message_id: messageId,
+      }),
+    );
+  } catch (e) {
+    const m = safeText(e?.message);
+    if (m.includes("message is not modified")) return null;
+    console.warn("editMessageReplyMarkup failed:", m);
+    return null;
+  }
+}
+
+function topicSendOpts(topicThreadId) {
+  return { message_thread_id: topicThreadId, disable_web_page_preview: true };
+}
+
+async function sendToTopicText(topicThreadId, text, extra = {}) {
+  return await withRetry(() =>
+    bot.sendMessage(ADMIN_GROUP_ID, text, { ...topicSendOpts(topicThreadId), parse_mode: "HTML", ...extra }),
+  );
+}
+
+async function sendToTopicPhoto(topicThreadId, fileId, caption, extra = {}) {
+  return await withRetry(() =>
+    bot.sendPhoto(ADMIN_GROUP_ID, fileId, {
+      ...topicSendOpts(topicThreadId),
+      caption,
+      parse_mode: "HTML",
+      ...extra,
+    }),
+  );
+}
+
+async function sendToTopicDocument(topicThreadId, fileId, caption, extra = {}) {
+  return await withRetry(() =>
+    bot.sendDocument(ADMIN_GROUP_ID, fileId, {
+      ...topicSendOpts(topicThreadId),
+      caption,
+      parse_mode: "HTML",
+      ...extra,
+    }),
+  );
+}
+
+function ensureQueue(gameId) {
+  if (!availableQueueByGame.has(gameId)) availableQueueByGame.set(gameId, []);
+  return availableQueueByGame.get(gameId);
+}
+
+function queueAddAvailable(gameId, messageId) {
+  const q = ensureQueue(gameId);
+  if (!q.includes(messageId)) q.push(messageId);
+  q.sort((a, b) => a - b);
+}
+
+function queueRemove(gameId, messageId) {
+  const q = ensureQueue(gameId);
+  const idx = q.indexOf(messageId);
+  if (idx >= 0) q.splice(idx, 1);
+}
+
+function getActiveGamesForUsers() {
+  const arr = [];
+  for (const g of gamesById.values()) {
+    if (g.status === "ACTIVE") arr.push(g);
+  }
+  arr.sort((a, b) => a.id.localeCompare(b.id));
+  return arr;
+}
+
+function formatGameLine(g) {
+  return `GAME | id=${g.id} | name=${g.name} | status=${g.status}`;
+}
+
+function parseKVLine(line, prefix) {
+  const t = safeText(line).trim();
+  if (!t.startsWith(prefix)) return null;
+  const parts = t.split("|").map(s => s.trim());
+  const out = {};
+  for (let i = 1; i < parts.length; i++) {
+    const seg = parts[i];
+    const eq = seg.indexOf("=");
+    if (eq === -1) continue;
+    const k = seg.slice(0, eq).trim();
+    const v = seg.slice(eq + 1).trim();
+    if (!k) continue;
+    out[k] = v;
+  }
+  return out;
+}
+
+function parseGameMessage(text) {
+  const kv = parseKVLine(text, "GAME |");
+  if (!kv) return null;
+  if (!kv.id || !kv.name || !kv.status) return null;
+  const status = kv.status;
+  if (!["ACTIVE", "DISABLED", "ARCHIVED"].includes(status)) return null;
+  return { id: kv.id, name: kv.name, status };
+}
+
+function formatAccountAvailableLine(game, username, password) {
+  return `ACCOUNT | game=${game} | username=${username} | password=${password} | status=AVAILABLE`;
+}
+
+function formatAccountAssignedLine(game, username, password, assignedTo, assignedAtIso) {
+  return `ACCOUNT | game=${game} | username=${username} | password=${password} | status=ASSIGNED | assigned_to=${assignedTo} | assigned_at=${assignedAtIso}`;
+}
+
+function parseAccountMessage(text) {
+  const kv = parseKVLine(text, "ACCOUNT |");
+  if (!kv) return null;
+  if (!kv.game || !kv.username || !kv.password || !kv.status) return null;
+  const status = kv.status;
+  if (!["AVAILABLE", "ASSIGNED"].includes(status)) return null;
+  const assigned_to = kv.assigned_to ? Number(kv.assigned_to) : undefined;
+  const assigned_at = kv.assigned_at ? kv.assigned_at : undefined;
+  return {
+    game: kv.game,
+    username: kv.username,
+    password: kv.password,
+    status,
+    assigned_to: Number.isFinite(assigned_to) ? assigned_to : undefined,
+    assigned_at: assigned_at || undefined,
+  };
+}
+
+function pickBestPhotoFileId(photoArr) {
+  if (!Array.isArray(photoArr) || photoArr.length === 0) return null;
+  const p = photoArr[photoArr.length - 1];
+  return p?.file_id || null;
+}
+
+function buildGamePickerKeyboard() {
+  const games = getActiveGamesForUsers();
+  const rows = [];
+  for (const g of games) {
+    rows.push([{ text: `🎮 ${g.name}`, callback_data: cb(["U", "GAME", g.id]) }]);
+  }
+  rows.push([{ text: "🔄 Refresh", callback_data: cb(["U", "REFRESH_GAMES"]) }]);
+  return { inline_keyboard: rows };
+}
+
+function buildMainMenuKeyboard() {
   return {
     inline_keyboard: [
-      GAMES.map(g => ({ text: g.label, callback_data: `U|GAME|${g.id}` })),
+      [{ text: "🧾 Register Account", callback_data: cb(["U", "MENU", "REGISTER"]) }],
+      [{ text: "👤 View My Account", callback_data: cb(["U", "MENU", "VIEW"]) }],
+      [{ text: "🟦 Load Balance", callback_data: cb(["U", "MENU", "LOAD"]) }],
+      [{ text: "🟩 Cashout", callback_data: cb(["U", "MENU", "CASHOUT"]) }],
+      [{ text: "🎮 Change Game", callback_data: cb(["U", "MENU", "CHANGE_GAME"]) }],
     ],
   };
 }
 
-function buildMainMenuKeyboard(gameId) {
-  return {
-    inline_keyboard: [
-      [{ text: "Register Account", callback_data: `U|MENU|REGISTER|${gameId}` }],
-      [{ text: "Load Balance", callback_data: `U|MENU|LOAD|${gameId}` }],
-      [{ text: "Cashout", callback_data: `U|MENU|CASHOUT|${gameId}` }],
-      [{ text: "Change Game", callback_data: `U|CHANGE_GAME` }],
-    ],
-  };
+function buildFlowNavKeyboard(flowKind) {
+  const rows = [];
+  rows.push([{ text: "✖ Cancel", callback_data: cb(["U", "FLOW", flowKind, "CANCEL"]) }]);
+  return { inline_keyboard: rows };
 }
 
-function buildIHavePaidKeyboard() {
-  return {
-    inline_keyboard: [
-      [{ text: "I Have Paid", callback_data: "U|PAID" }],
-      [{ text: "Cancel", callback_data: "U|CANCEL" }],
-    ],
-  };
+function buildLoadStepKeyboard(step, canProceed) {
+  const rows = [];
+  if (step === "QR_WAIT_PAID") {
+    rows.push([{ text: "✅ I Have Paid", callback_data: cb(["U", "FLOW", "LOAD", "PAID"]) }]);
+  }
+  if (step === "DONE") {
+    rows.push([{ text: "🏠 Back to Menu", callback_data: cb(["U", "FLOW", "LOAD", "MENU"]) }]);
+  }
+  if (canProceed === true && step === "WAIT_SCREENSHOT") {
+    rows.push([{ text: "🔁 Re-check", callback_data: cb(["U", "FLOW", "LOAD", "RENDER"]) }]);
+  }
+  rows.push([{ text: "✖ Cancel", callback_data: cb(["U", "FLOW", "LOAD", "CANCEL"]) }]);
+  return { inline_keyboard: rows };
+}
+
+function buildCashoutStepKeyboard(step) {
+  const rows = [];
+  if (step === "DONE") {
+    rows.push([{ text: "🏠 Back to Menu", callback_data: cb(["U", "FLOW", "CASHOUT", "MENU"]) }]);
+  }
+  rows.push([{ text: "✖ Cancel", callback_data: cb(["U", "FLOW", "CASHOUT", "CANCEL"]) }]);
+  return { inline_keyboard: rows };
+}
+
+function buildEmailKeyboard(step) {
+  const rows = [];
+  if (step === "DONE") rows.push([{ text: "🏠 Back to Menu", callback_data: cb(["U", "FLOW", "EMAIL", "MENU"]) }]);
+  rows.push([{ text: "✖ Cancel", callback_data: cb(["U", "FLOW", "EMAIL", "CANCEL"]) }]);
+  return { inline_keyboard: rows };
 }
 
 function buildAdminApproveRejectKeyboard(requestId) {
   return {
     inline_keyboard: [
       [
-        { text: "✅ Approve", callback_data: `A|APPROVE|${requestId}` },
-        { text: "❌ Reject", callback_data: `A|REJECT|${requestId}` },
+        { text: "✅ Approve", callback_data: cb(["A", "APP", "OK", requestId]) },
+        { text: "❌ Reject", callback_data: cb(["A", "APP", "NO", requestId]) },
       ],
     ],
   };
 }
 
-async function safeEditMessageText(chatId, messageId, text, replyMarkup) {
-  try {
-    return await bot.editMessageText(text, {
-      chat_id: chatId,
-      message_id: messageId,
-      reply_markup: replyMarkup,
-      parse_mode: "HTML",
-      disable_web_page_preview: true,
-    });
-  } catch (e) {
-    // Common: "message is not modified" or message too old, etc.
-    console.warn("editMessageText failed:", e.message);
-    return null;
-  }
+function buildAdminRejectCancelKeyboard(requestId) {
+  return {
+    inline_keyboard: [[{ text: "↩ Cancel Reject", callback_data: cb(["A", "APP", "RC", requestId]) }]],
+  };
 }
 
-async function safeEditMessageReplyMarkup(chatId, messageId, replyMarkup) {
-  try {
-    return await bot.editMessageReplyMarkup(replyMarkup, {
-      chat_id: chatId,
-      message_id: messageId,
-    });
-  } catch (e) {
-    console.warn("editMessageReplyMarkup failed:", e.message);
-    return null;
-  }
+function buildAdminGameControlsKeyboard(gameId, status) {
+  const rows = [];
+  if (status !== "ACTIVE") rows.push([{ text: "✅ Enable", callback_data: cb(["A", "GAME", gameId, "ACTIVE"]) }]);
+  if (status !== "DISABLED") rows.push([{ text: "🚫 Disable", callback_data: cb(["A", "GAME", gameId, "DISABLED"]) }]);
+  if (status !== "ARCHIVED") rows.push([{ text: "🗄 Archive", callback_data: cb(["A", "GAME", gameId, "ARCHIVED"]) }]);
+  return { inline_keyboard: rows };
 }
 
-async function safeAnswerCallbackQuery(cbqId, text, showAlert = false) {
+// =========================
+// ADMIN AUTH
+// =========================
+async function isAdmin(userId) {
+  const cached = adminCheckCache.get(userId);
+  const now = Date.now();
+  if (cached && now - cached.checked_at < ADMIN_CACHE_TTL_MS) return cached.ok;
   try {
-    await bot.answerCallbackQuery(cbqId, { text, show_alert: showAlert });
-  } catch (e) {
-    // ignore
-  }
-}
-
-// Check admin status in group (stronger than a static list)
-async function isUserAdminInGroup(userId) {
-  // If ADMIN_USER_IDS is provided, allow those immediately
-  if (ADMIN_USER_IDS.length && ADMIN_USER_IDS.includes(userId)) return true;
-
-  try {
-    const member = await bot.getChatMember(ADMIN_GROUP_ID, userId);
-    return member && (member.status === "administrator" || member.status === "creator");
-  } catch (e) {
+    const m = await bot.getChatMember(ADMIN_GROUP_ID, userId);
+    const ok = m && (m.status === "administrator" || m.status === "creator");
+    adminCheckCache.set(userId, { ok: !!ok, checked_at: now });
+    return !!ok;
+  } catch {
+    adminCheckCache.set(userId, { ok: false, checked_at: now });
     return false;
   }
 }
 
-// ===================== ADMIN GROUP “DATABASE” PARSING =====================
-//
-// Accounts are stored as messages in the admin group with this canonical line format:
-//
-// ACCOUNT | game=GameA | username=xxx | password=yyy | status=AVAILABLE
-// Optional fields added/edited by bot:
-// ACCOUNT | game=GameA | username=xxx | password=yyy | status=ASSIGNED | assigned_to=123456
-//
-// We parse these messages and cache them.
-//
+// =========================
+// SNAPSHOTS (SYSTEM_BACKUPS)
+// =========================
+function snapshotObject() {
+  const games = Array.from(gamesById.entries());
+  const accounts = Array.from(accountsByMsgId.entries());
+  const assigned = Array.from(assignedByUserGame.entries());
+  const users = Array.from(knownUsers.entries());
+  const qrs = Array.from(paymentQRs.entries());
+  return { games, accounts, assigned, users, qrs };
+}
 
-function parseAccountText(text) {
-  if (!text) return null;
-  const t = text.trim();
-  if (!t.startsWith("ACCOUNT |")) return null;
+function buildSnapshotText() {
+  const snap = snapshotObject();
+  // REQUIRED FORMAT (exact headers)
+  return [
+    "SNAPSHOT",
+    "Type: STATE",
+    `Timestamp: ${isoNow()}`,
+    `Games: ${json(snap.games)}`,
+    `Accounts: ${json(snap.accounts)}`,
+    `AssignedMap: ${json(snap.assigned)}`,
+    `KnownUsers: ${json(snap.users)}`,
+    `PaymentQRs: ${json(snap.qrs)}`,
+  ].join("\n");
+}
 
-  // naive parsing by splitting on "|"
-  const parts = t.split("|").map(p => p.trim());
-  // parts[0] = "ACCOUNT"
-  const data = {};
-  for (let i = 1; i < parts.length; i++) {
-    const seg = parts[i];
-    const [k, ...rest] = seg.split("=");
-    if (!k || rest.length === 0) continue;
-    data[k.trim()] = rest.join("=").trim();
-  }
-  if (!data.game || !data.username || !data.password || !data.status) return null;
-
+function parseSnapshotText(text) {
+  const t = safeText(text);
+  if (!t.startsWith("SNAPSHOT\n")) return null;
+  const lines = t.split("\n");
+  const getLine = (prefix) => lines.find(l => l.startsWith(prefix));
+  const gamesLine = getLine("Games: ");
+  const accountsLine = getLine("Accounts: ");
+  const assignedLine = getLine("AssignedMap: ");
+  const usersLine = getLine("KnownUsers: ");
+  const qrsLine = getLine("PaymentQRs: ");
+  if (!gamesLine || !accountsLine || !assignedLine || !usersLine || !qrsLine) return null;
+  const parseJson = (line) => {
+    const idx = line.indexOf(": ");
+    if (idx === -1) return null;
+    const payload = line.slice(idx + 2).trim();
+    try {
+      return JSON.parse(payload);
+    } catch {
+      return null;
+    }
+  };
   return {
-    game: data.game,
-    username: data.username,
-    password: data.password,
-    status: data.status,
-    assigned_to: data.assigned_to ? Number(data.assigned_to) : null,
+    games: parseJson(gamesLine),
+    accounts: parseJson(accountsLine),
+    assigned: parseJson(assignedLine),
+    users: parseJson(usersLine),
+    qrs: parseJson(qrsLine),
   };
 }
 
-function accountKey(game, username) {
-  return `${game}|${username}`;
-}
+function rehydrateFromSnapshot(parsed) {
+  if (!parsed) return false;
+  if (!Array.isArray(parsed.games)) return false;
+  if (!Array.isArray(parsed.accounts)) return false;
+  if (!Array.isArray(parsed.assigned)) return false;
+  if (!Array.isArray(parsed.users)) return false;
+  if (!Array.isArray(parsed.qrs)) return false;
 
-// Load recent account messages from admin group (best-effort)
-async function refreshAccountCache() {
-  // NOTE: Telegram Bot API cannot truly “search history” unless the bot is present and receives updates.
-  // However, in practice, if accounts are created while bot is in group, we cache them as they come in.
-  // This refresh attempts to use getUpdates indirectly via polling is handled by library.
-  // So refreshAccountCache is mainly a placeholder for future enhancements.
-  //
-  // We'll keep cache updated from on("message") for admin group.
-  return;
-}
+  gamesById.clear();
+  accountsByMsgId.clear();
+  assignedByUserGame.clear();
+  knownUsers.clear();
+  paymentQRs.clear();
+  availableQueueByGame.clear();
 
-// Find first AVAILABLE account for game from cache
-function findFirstAvailableAccount(gameId) {
-  for (const acc of accountCache.values()) {
-    if (acc.game === gameId && acc.status === "AVAILABLE") {
-      return acc;
-    }
+  for (const [id, g] of parsed.games) {
+    if (!g || !id) continue;
+    gamesById.set(id, g);
   }
-  return null;
+
+  for (const [msgId, acc] of parsed.accounts) {
+    if (!acc || !msgId) continue;
+    accountsByMsgId.set(Number(msgId), acc);
+    if (acc.status === "AVAILABLE") queueAddAvailable(acc.game, Number(msgId));
+  }
+
+  for (const [k, v] of parsed.assigned) {
+    if (!k || !v) continue;
+    assignedByUserGame.set(k, v);
+  }
+
+  for (const [uid, u] of parsed.users) {
+    if (!uid || !u) continue;
+    knownUsers.set(Number(uid), u);
+  }
+
+  for (const [game, qr] of parsed.qrs) {
+    if (!game || !qr) continue;
+    paymentQRs.set(game, qr);
+  }
+
+  return true;
 }
 
-// Update account message in admin group to ASSIGNED
-async function assignAccount(acc, userId) {
-  const newText =
-    `ACCOUNT | game=${acc.game} | username=${acc.username} | password=${acc.password} | status=ASSIGNED | assigned_to=${userId} | assigned_at=${nowIso()}`;
-
-  // Edit the admin group message
-  await safeEditMessageText(ADMIN_GROUP_ID, acc.message_id, newText, null);
-
-  // Update cache
-  acc.status = "ASSIGNED";
-  acc.assigned_to = userId;
-  accountCache.set(accountKey(acc.game, acc.username), acc);
-
-  return acc;
+async function writeSnapshot() {
+  const text = buildSnapshotText();
+  const sent = await sendToTopicText(TOPIC_THREAD_IDS.SYSTEM_BACKUPS, text);
+  // Make restart rehydration possible via getChat().pinned_message
+  try {
+    await bot.pinChatMessage(ADMIN_GROUP_ID, sent.message_id, { disable_notification: true });
+  } catch (e) {
+    console.warn("pinChatMessage failed:", safeText(e?.message));
+  }
 }
 
-// ===================== USER HANDLERS =====================
-async function sendWelcomeAndGames(chatId) {
-  await bot.sendMessage(chatId, "Welcome! Select a game:", {
-    reply_markup: buildGameKeyboard(),
-  });
+async function rehydrateOnStartup() {
+  try {
+    const chat = await bot.getChat(ADMIN_GROUP_ID);
+    const pinned = chat?.pinned_message;
+    const text = pinned?.text || pinned?.caption || null;
+    if (!text) return false;
+    const parsed = parseSnapshotText(text);
+    if (!parsed) return false;
+    const ok = rehydrateFromSnapshot(parsed);
+    return ok;
+  } catch (e) {
+    console.warn("rehydrateOnStartup failed:", safeText(e?.message));
+    return false;
+  }
+}
+
+// =========================
+// LOGGING (TOPICS)
+// =========================
+async function logEmail(userId, email) {
+  const u = knownUsers.get(userId);
+  const label = u?.username ? `@${u.username}` : safeText(userId);
+  const text = [
+    "📧 <b>EMAIL COLLECTED</b>",
+    `User: <code>${label}</code>`,
+    `User ID: <code>${userId}</code>`,
+    `Email: <code>${email}</code>`,
+    `Timestamp: <code>${isoNow()}</code>`,
+  ].join("\n");
+  await sendToTopicText(TOPIC_THREAD_IDS.EMAIL_LOGS, text);
+}
+
+async function logTransaction(req) {
+  const text = [
+    "🧾 <b>TRANSACTION</b>",
+    `Type: <b>${req.type}</b>`,
+    `Game: <b>${req.game}</b>`,
+    `User ID: <code>${req.user_id}</code>`,
+    `Amount: <b>${req.amount}</b>`,
+    `Decision: <b>${req.status}</b>`,
+    `Reason: <code>${req.reason || "-"}</code>`,
+    `Approved by: <code>${req.decision_by || "-"}</code>`,
+    `Timestamp: <code>${req.decision_at || isoNow()}</code>`,
+    `Request ID: <code>${req.request_id}</code>`,
+  ].join("\n");
+  await sendToTopicText(TOPIC_THREAD_IDS.TRANSACTION_LOGS, text);
+}
+
+async function logAccountAssignment(userId, gameId, acc, inventoryMsgId) {
+  const text = [
+    "📦 <b>ACCOUNT ASSIGNED</b>",
+    `Game: <b>${gameId}</b>`,
+    `User ID: <code>${userId}</code>`,
+    `Username: <code>${acc.username}</code>`,
+    `Inventory Msg ID: <code>${inventoryMsgId}</code>`,
+    `Timestamp: <code>${isoNow()}</code>`,
+  ].join("\n");
+  await sendToTopicText(TOPIC_THREAD_IDS.TRANSACTION_LOGS, text);
+}
+
+async function logPromotion(promoText, stats) {
+  const text = [
+    "📣 <b>PROMOTION</b>",
+    `Timestamp: <code>${isoNow()}</code>`,
+    `Known users: <b>${stats.known}</b>`,
+    `Delivered: <b>${stats.delivered}</b>`,
+    `Blocked/Failed: <b>${stats.failed}</b>`,
+    "",
+    "<b>Message</b>:",
+    safeText(promoText),
+  ].join("\n");
+  await sendToTopicText(TOPIC_THREAD_IDS.PROMOTIONS, text);
+}
+
+async function logAdminUserMsg(adminFrom, targetUserId, msgText, result) {
+  const text = [
+    "✉️ <b>ADMIN → USER MESSAGE</b>",
+    `Admin: <code>${adminIdentity(adminFrom)}</code>`,
+    `Target User ID: <code>${targetUserId}</code>`,
+    `Result: <code>${result}</code>`,
+    `Timestamp: <code>${isoNow()}</code>`,
+    "",
+    "<b>Message</b>:",
+    safeText(msgText),
+  ].join("\n");
+  await sendToTopicText(TOPIC_THREAD_IDS.ADMIN_USER_MSGS, text);
+}
+
+// =========================
+// PRIVATE CHAT UI RENDERING
+// =========================
+function selectedGameForUser(userId) {
+  return knownUsers.get(userId)?.selected_game || null;
+}
+
+function setSelectedGameForUser(userId, gameId) {
+  const u = knownUsers.get(userId);
+  if (!u) return;
+  u.selected_game = gameId;
+  u.last_seen = isoNow();
+  knownUsers.set(userId, u);
+}
+
+function userEmail(userId) {
+  return knownUsers.get(userId)?.email || null;
+}
+
+function setUserEmail(userId, email) {
+  const u = knownUsers.get(userId);
+  if (!u) return;
+  u.email = email;
+  u.last_seen = isoNow();
+  knownUsers.set(userId, u);
+}
+
+function renderGamePickerText(userId) {
+  const sel = selectedGameForUser(userId);
+  const selLine = sel ? `Current: <b>${sel}</b>` : "Current: <b>None</b>";
+  return [
+    "🎮 <b>Select Your Game</b>",
+    selLine,
+    "",
+    "Choose from active games below:",
+  ].join("\n");
+}
+
+function renderMainMenuText(userId) {
+  const game = selectedGameForUser(userId);
+  return [
+    "🏠 <b>Main Menu</b>",
+    "",
+    `🎮 Game: <b>${game || "None"}</b>`,
+    "",
+    "Choose an option:",
+  ].join("\n");
+}
+
+function renderViewAccountText(userId) {
+  const game = selectedGameForUser(userId);
+  if (!game) {
+    return [
+      "👤 <b>View My Account</b>",
+      "",
+      "No game selected.",
+      "Tap <b>Change Game</b> to continue.",
+    ].join("\n");
+  }
+  const key = makeUserGameKey(userId, game);
+  const assigned = assignedByUserGame.get(key);
+  if (!assigned) {
+    return [
+      "👤 <b>View My Account</b>",
+      "",
+      `🎮 Game: <b>${game}</b>`,
+      "",
+      "Status: <b>NO ACCOUNT ASSIGNED</b>",
+      "",
+      "Tap <b>Register Account</b> to get an account (FIFO).",
+    ].join("\n");
+  }
+  return [
+    "👤 <b>View My Account</b>",
+    "",
+    `🎮 Game: <b>${game}</b>`,
+    "",
+    "Status: <b>ASSIGNED</b>",
+    `Username: <code>${assigned.username}</code>`,
+    `Password: <code>${assigned.password}</code>`,
+    `Assigned At: <code>${assigned.assigned_at}</code>`,
+  ].join("\n");
+}
+
+async function sendGamePicker(chatId, userId) {
+  await withRetry(() =>
+    bot.sendMessage(chatId, renderGamePickerText(userId), {
+      parse_mode: "HTML",
+      reply_markup: buildGamePickerKeyboard(),
+    }),
+  );
 }
 
 async function sendMainMenu(chatId, userId) {
-  const s = getSession(userId);
-  if (!s.game) {
-    return sendWelcomeAndGames(chatId);
-  }
-  await bot.sendMessage(
-    chatId,
-    `Selected: <b>${gameLabel(s.game)}</b>\nChoose an option:`,
-    { parse_mode: "HTML", reply_markup: buildMainMenuKeyboard(s.game) }
+  await withRetry(() =>
+    bot.sendMessage(chatId, renderMainMenuText(userId), {
+      parse_mode: "HTML",
+      reply_markup: buildMainMenuKeyboard(),
+    }),
   );
 }
 
-async function startRegisterFlow(chatId, userId, gameId) {
-  const s = getSession(userId);
-  s.flow = "REGISTER";
-  s.step = "IDLE";
-
-  // Find first available account from cache
-  const acc = findFirstAvailableAccount(gameId);
-  if (!acc) {
-    await bot.sendMessage(chatId, "No accounts available right now.");
-    return sendMainMenu(chatId, userId);
-  }
-
-  // Assign it by editing the admin message
-  await assignAccount(acc, userId);
-
-  // Send credentials privately
-  await bot.sendMessage(
-    chatId,
-    `✅ Account assigned for <b>${gameLabel(gameId)}</b>\n\n` +
-      `Username: <code>${acc.username}</code>\n` +
-      `Password: <code>${acc.password}</code>`,
-    { parse_mode: "HTML" }
+// =========================
+// PRIVATE FLOWS (ONE MESSAGE ONLY)
+// =========================
+async function startEmailFlow(userId) {
+  const chatId = userId;
+  const msg = await withRetry(() =>
+    bot.sendMessage(
+      chatId,
+      [
+        "📧 <b>Email Required</b>",
+        "Step 1 / 1",
+        "",
+        "Please enter your email address to continue:",
+      ].join("\n"),
+      { parse_mode: "HTML", reply_markup: buildEmailKeyboard("WAIT_EMAIL") },
+    ),
   );
-
-  resetToMenu(userId);
-  return sendMainMenu(chatId, userId);
-}
-
-async function startLoadFlow(chatId, userId, gameId) {
-  const s = getSession(userId);
-  s.flow = "LOAD";
-  s.step = "LOAD_WAIT_USERNAME";
-  s.temp = { game: gameId };
-
-  await bot.sendMessage(chatId, "Enter your game username:");
-}
-
-async function startCashoutFlow(chatId, userId, gameId) {
-  const s = getSession(userId);
-  s.flow = "CASHOUT";
-  s.step = "CASHOUT_WAIT_USERNAME";
-  s.temp = { game: gameId };
-
-  await bot.sendMessage(chatId, "Enter game username:");
-}
-
-// Handle user text & photos (private chat)
-async function handleUserMessage(msg) {
-  const userId = msg.from.id;
-  const chatId = msg.chat.id;
-  const s = getSession(userId);
-
-  // Commands
-  if (msg.text === "/start") {
-    resetToMenu(userId);
-    return sendWelcomeAndGames(chatId);
-  }
-
-  // Only process stateful inputs in private chat
-  if (!isPrivateChat(msg)) return;
-
-  // Cancel word (optional)
-  if (msg.text && msg.text.toLowerCase() === "cancel") {
-    resetToMenu(userId);
-    await bot.sendMessage(chatId, "Cancelled.");
-    return sendMainMenu(chatId, userId);
-  }
-
-  // PHOTO upload step for load proof
-  if (s.step === "LOAD_WAIT_PROOF") {
-    if (!msg.photo || msg.photo.length === 0) {
-      await bot.sendMessage(chatId, "Please upload a payment screenshot (photo).");
-      return;
-    }
-
-    // Choose highest-res photo file_id
-    const photo = msg.photo[msg.photo.length - 1];
-    const fileId = photo.file_id;
-
-    // Create admin request message + attach screenshot
-    const requestId = `L-${userId}-${Date.now()}`;
-
-    const text =
-      `🟡 <b>LOAD REQUEST</b>\n` +
-      `Game: <b>${gameLabel(s.temp.game)}</b>\n` +
-      `User ID: <code>${userId}</code>\n` +
-      `Username: <code>${s.temp.username}</code>\n` +
-      `Amount: <b>${s.temp.amount}</b>\n` +
-      `Status: <b>PENDING</b>\n` +
-      `Request ID: <code>${requestId}</code>`;
-
-    const sent = await bot.sendPhoto(ADMIN_GROUP_ID, fileId, {
-      caption: text,
-      parse_mode: "HTML",
-      reply_markup: buildAdminApproveRejectKeyboard(requestId),
-    });
-
-    pendingRequests.set(requestId, {
-      type: "LOAD",
-      userId,
-      game: s.temp.game,
-      username: s.temp.username,
-      amount: s.temp.amount,
-      adminMsgId: sent.message_id,
-      photoFileId: fileId,
-    });
-
-    await bot.sendMessage(chatId, "✅ Proof received. Sent to admins for approval.");
-
-    resetToMenu(userId);
-    return sendMainMenu(chatId, userId);
-  }
-
-  // Text steps
-  if (msg.text) {
-    const text = msg.text.trim();
-
-    // LOAD flow
-    if (s.step === "LOAD_WAIT_USERNAME") {
-      s.temp.username = text;
-      s.step = "LOAD_WAIT_AMOUNT";
-      await bot.sendMessage(chatId, "Enter amount:");
-      return;
-    }
-    if (s.step === "LOAD_WAIT_AMOUNT") {
-      const amt = Number(text);
-      if (!Number.isFinite(amt) || amt <= 0) {
-        await bot.sendMessage(chatId, "Please enter a valid amount (number > 0).");
-        return;
-      }
-      s.temp.amount = amt;
-      s.step = "LOAD_SHOW_QR";
-
-      // Send payment QR + [I Have Paid]
-      if (PAYMENT_QR_FILE_ID) {
-        await bot.sendPhoto(chatId, PAYMENT_QR_FILE_ID, {
-          caption: "Scan the QR to pay, then tap <b>I Have Paid</b>.",
-          parse_mode: "HTML",
-          reply_markup: buildIHavePaidKeyboard(),
-        });
-      } else {
-        await bot.sendMessage(chatId, "Payment QR is not configured. Ask admin to set it.", {
-          reply_markup: buildIHavePaidKeyboard(),
-        });
-      }
-      return;
-    }
-
-    // CASHOUT flow
-    if (s.step === "CASHOUT_WAIT_USERNAME") {
-      s.temp.username = text;
-      s.step = "CASHOUT_WAIT_AMOUNT";
-      await bot.sendMessage(chatId, "Enter amount:");
-      return;
-    }
-    if (s.step === "CASHOUT_WAIT_AMOUNT") {
-      const amt = Number(text);
-      if (!Number.isFinite(amt) || amt <= 0) {
-        await bot.sendMessage(chatId, "Please enter a valid amount (number > 0).");
-        return;
-      }
-      s.temp.amount = amt;
-      s.step = "CASHOUT_WAIT_CASHTAG";
-      await bot.sendMessage(chatId, "Enter cashtag:");
-      return;
-    }
-    if (s.step === "CASHOUT_WAIT_CASHTAG") {
-      s.temp.cashtag = text;
-
-      const requestId = `C-${userId}-${Date.now()}`;
-
-      const caption =
-        `🟡 <b>CASHOUT REQUEST</b>\n` +
-        `Game: <b>${gameLabel(s.temp.game)}</b>\n` +
-        `User ID: <code>${userId}</code>\n` +
-        `Username: <code>${s.temp.username}</code>\n` +
-        `Amount: <b>${s.temp.amount}</b>\n` +
-        `Cashtag: <code>${s.temp.cashtag}</code>\n` +
-        `Status: <b>PENDING</b>\n` +
-        `Request ID: <code>${requestId}</code>`;
-
-      const sent = await bot.sendMessage(ADMIN_GROUP_ID, caption, {
-        parse_mode: "HTML",
-        reply_markup: buildAdminApproveRejectKeyboard(requestId),
-      });
-
-      pendingRequests.set(requestId, {
-        type: "CASHOUT",
-        userId,
-        game: s.temp.game,
-        username: s.temp.username,
-        amount: s.temp.amount,
-        cashtag: s.temp.cashtag,
-        adminMsgId: sent.message_id,
-      });
-
-      await bot.sendMessage(chatId, "✅ Cashout request submitted. Waiting for admin decision.");
-
-      resetToMenu(userId);
-      return sendMainMenu(chatId, userId);
-    }
-  }
-
-  // If user sends something unexpected
-  // show menu rather than getting stuck
-  if (s.step !== "IDLE") {
-    await bot.sendMessage(chatId, "I didn’t understand that. Type <b>cancel</b> to abort.", {
-      parse_mode: "HTML",
-    });
-  } else {
-    await sendMainMenu(chatId, userId);
-  }
-}
-
-// Handle user callbacks (private chat buttons)
-async function handleUserCallback(cbq) {
-  const userId = cbq.from.id;
-  const chatId = cbq.message.chat.id;
-
-  // Only allow user callbacks in private chats
-  if (cbq.message.chat.type !== "private") return;
-
-  const data = cbq.data || "";
-  const s = getSession(userId);
-
-  // U|GAME|GameA
-  if (data.startsWith("U|GAME|")) {
-    const gameId = data.split("|")[2];
-    s.game = gameId;
-    resetToMenu(userId); // keep game but reset flow
-    s.game = gameId;
-
-    await safeAnswerCallbackQuery(cbq.id, `Selected ${gameLabel(gameId)}`);
-    await bot.sendMessage(chatId, `Selected: <b>${gameLabel(gameId)}</b>`, { parse_mode: "HTML" });
-    return sendMainMenu(chatId, userId);
-  }
-
-  // U|MENU|REGISTER|GameA
-  if (data.startsWith("U|MENU|")) {
-    const [, , action, gameId] = data.split("|");
-    await safeAnswerCallbackQuery(cbq.id, "OK");
-
-    if (!s.game) s.game = gameId;
-
-    if (action === "REGISTER") return startRegisterFlow(chatId, userId, s.game);
-    if (action === "LOAD") return startLoadFlow(chatId, userId, s.game);
-    if (action === "CASHOUT") return startCashoutFlow(chatId, userId, s.game);
-  }
-
-  if (data === "U|CHANGE_GAME") {
-    resetToMenu(userId);
-    await safeAnswerCallbackQuery(cbq.id, "Choose a game");
-    return sendWelcomeAndGames(chatId);
-  }
-
-  if (data === "U|CANCEL") {
-    resetToMenu(userId);
-    await safeAnswerCallbackQuery(cbq.id, "Cancelled");
-    await bot.sendMessage(chatId, "Cancelled.");
-    return sendMainMenu(chatId, userId);
-  }
-
-  if (data === "U|PAID") {
-    // Move to proof upload
-    if (s.flow !== "LOAD") {
-      await safeAnswerCallbackQuery(cbq.id, "Not in load flow");
-      return;
-    }
-    s.step = "LOAD_WAIT_PROOF";
-    await safeAnswerCallbackQuery(cbq.id, "Upload screenshot");
-    await bot.sendMessage(chatId, "Please upload your payment screenshot (photo).");
-    return;
-  }
-
-  await safeAnswerCallbackQuery(cbq.id, "Unknown action");
-}
-
-// ===================== ADMIN HANDLERS =====================
-async function handleAdminCallback(cbq) {
-  const fromId = cbq.from.id;
-  const data = cbq.data || "";
-
-  // Only process admin callbacks inside the admin group
-  if (cbq.message.chat.id !== ADMIN_GROUP_ID) return;
-
-  // Confirm admin
-  const ok = await isUserAdminInGroup(fromId);
-  if (!ok) {
-    await safeAnswerCallbackQuery(cbq.id, "Admins only", true);
-    return;
-  }
-
-  // A|APPROVE|requestId
-  if (data.startsWith("A|APPROVE|") || data.startsWith("A|REJECT|")) {
-    const [, action, requestId] = data.split("|");
-    const req = pendingRequests.get(requestId);
-    if (!req) {
-      await safeAnswerCallbackQuery(cbq.id, "Request not found / already handled", true);
-      // Remove buttons if stale
-      await safeEditMessageReplyMarkup(ADMIN_GROUP_ID, cbq.message.message_id, { inline_keyboard: [] });
-      return;
-    }
-
-    const approved = action === "APPROVE";
-    const newStatus = approved ? "APPROVED" : "REJECTED";
-
-    // Edit admin message text/caption to show status
-    // For photos, it's caption; for text messages, it's text.
-    const isPhoto = !!cbq.message.photo;
-
-    const baseLines = (isPhoto ? (cbq.message.caption || "") : (cbq.message.text || "")).split("\n");
-    const updated = baseLines.map(line => {
-      if (line.startsWith("Status:")) return `Status: <b>${newStatus}</b>`;
-      return line;
-    });
-
-    // Add admin marker line
-    updated.push(`Admin: <code>${fromId}</code>`);
-    updated.push(`Decision At: <code>${nowIso()}</code>`);
-
-    const newContent = updated.join("\n");
-
-    try {
-      if (isPhoto) {
-        await bot.editMessageCaption(newContent, {
-          chat_id: ADMIN_GROUP_ID,
-          message_id: cbq.message.message_id,
-          parse_mode: "HTML",
-          reply_markup: { inline_keyboard: [] },
-        });
-      } else {
-        await safeEditMessageText(ADMIN_GROUP_ID, cbq.message.message_id, newContent, { inline_keyboard: [] });
-      }
-    } catch (e) {
-      console.warn("Failed to edit admin decision message:", e.message);
-      // still continue
-    }
-
-    // Notify user
-    const notifyText =
-      req.type === "LOAD"
-        ? (approved ? "✅ Load approved" : "❌ Load rejected")
-        : (approved ? "✅ Cashout approved" : "❌ Cashout rejected");
-
-    try {
-      await bot.sendMessage(req.userId, notifyText);
-    } catch (e) {
-      // user may have blocked bot
-      console.warn("Failed to notify user:", e.message);
-    }
-
-    pendingRequests.delete(requestId);
-
-    await safeAnswerCallbackQuery(cbq.id, `Marked ${newStatus}`);
-    return;
-  }
-
-  await safeAnswerCallbackQuery(cbq.id, "Unknown admin action");
-}
-
-// ===================== ADMIN GROUP MESSAGE INGEST =====================
-// This keeps accountCache updated whenever someone posts an ACCOUNT line.
-async function ingestAdminGroupMessage(msg) {
-  // Only parse text messages for accounts
-  if (!msg.text) return;
-
-  const parsed = parseAccountText(msg.text);
-  if (!parsed) return;
-
-  const key = accountKey(parsed.game, parsed.username);
-  accountCache.set(key, {
-    ...parsed,
+  userFlows.set(userId, {
+    kind: "EMAIL",
+    chat_id: chatId,
     message_id: msg.message_id,
+    step: "WAIT_EMAIL",
+    started_at: isoNow(),
   });
 }
 
-// ===================== ROUTERS =====================
+async function renderEmailFlow(userId, note) {
+  const flow = userFlows.get(userId);
+  if (!flow || flow.kind !== "EMAIL") return;
+  const header = [
+    "📧 <b>Email Required</b>",
+    "Step 1 / 1",
+    "",
+    "Enter your email address:",
+  ];
+  if (note) header.push("", `⚠️ <i>${note}</i>`);
+  await safeEditText(flow.chat_id, flow.message_id, header.join("\n"), buildEmailKeyboard(flow.step));
+}
+
+async function finishEmailFlow(userId) {
+  const flow = userFlows.get(userId);
+  if (!flow || flow.kind !== "EMAIL") return;
+  flow.step = "DONE";
+  const email = userEmail(userId);
+  await safeEditText(
+    flow.chat_id,
+    flow.message_id,
+    ["✅ <b>Email Saved</b>", "", `Email: <code>${email}</code>`].join("\n"),
+    buildEmailKeyboard("DONE"),
+  );
+}
+
+async function startLoadFlow(userId) {
+  const chatId = userId;
+  const game = selectedGameForUser(userId);
+  if (!game) {
+    const msg = await withRetry(() =>
+      bot.sendMessage(chatId, "🎮 Please select a game first.", { parse_mode: "HTML", reply_markup: buildGamePickerKeyboard() }),
+    );
+    return msg;
+  }
+
+  const qr = paymentQRs.get(game);
+  if (!qr) {
+    const msg = await withRetry(() =>
+      bot.sendMessage(
+        chatId,
+        [
+          "🟦 <b>Load Balance</b>",
+          "",
+          `🎮 Game: <b>${game}</b>`,
+          "",
+          "⚠️ <b>Payment QR not configured</b>",
+          "Please contact an admin.",
+        ].join("\n"),
+        { parse_mode: "HTML", reply_markup: buildMainMenuKeyboard() },
+      ),
+    );
+    return msg;
+  }
+
+  // Start as a media message so we can always keep QR displayed in the same message.
+  const caption = [
+    "🟦 <b>Load Balance</b>",
+    "Step 1 / 4",
+    "",
+    `🎮 Game: <b>${game}</b>`,
+    "",
+    "Enter your username:",
+  ].join("\n");
+
+  const sent =
+    qr.type === "photo"
+      ? await withRetry(() => bot.sendPhoto(chatId, qr.file_id, { caption, parse_mode: "HTML", reply_markup: buildLoadStepKeyboard("WAIT_USERNAME") }))
+      : await withRetry(() => bot.sendDocument(chatId, qr.file_id, { caption, parse_mode: "HTML", reply_markup: buildLoadStepKeyboard("WAIT_USERNAME") }));
+
+  userFlows.set(userId, {
+    kind: "LOAD",
+    chat_id: chatId,
+    message_id: sent.message_id,
+    step: "WAIT_USERNAME",
+    game,
+    started_at: isoNow(),
+  });
+}
+
+function renderLoadCaption(flow, note) {
+  const lines = [];
+  lines.push("🟦 <b>Load Balance</b>");
+  if (flow.step === "WAIT_USERNAME") lines.push("Step 1 / 4");
+  if (flow.step === "WAIT_AMOUNT") lines.push("Step 2 / 4");
+  if (flow.step === "QR_WAIT_PAID") lines.push("Step 3 / 4");
+  if (flow.step === "WAIT_SCREENSHOT") lines.push("Step 4 / 4");
+  if (flow.step === "PROCESSING") lines.push("⏳ Processing…");
+  if (flow.step === "DONE") lines.push("✅ Complete");
+  lines.push("");
+  lines.push(`🎮 Game: <b>${flow.game}</b>`);
+  lines.push("");
+  lines.push(`👤 Username: <code>${flow.username || "-"}</code>`);
+  lines.push(`💵 Amount: <b>${typeof flow.amount === "number" ? flow.amount : "-"}</b>`);
+  lines.push("");
+  if (flow.step === "WAIT_USERNAME") lines.push("Enter your username:");
+  if (flow.step === "WAIT_AMOUNT") lines.push("Enter amount:");
+  if (flow.step === "QR_WAIT_PAID") {
+    lines.push("Scan QR & Pay");
+    lines.push("Then tap <b>I Have Paid</b>.");
+  }
+  if (flow.step === "WAIT_SCREENSHOT") {
+    lines.push("Send your <b>payment screenshot</b> now.");
+    lines.push("No extra messages from the bot until you finish.");
+  }
+  if (flow.step === "PROCESSING") {
+    lines.push(`Status: <b>PENDING</b>`);
+    lines.push(`Request ID: <code>${flow.request_id}</code>`);
+  }
+  if (flow.step === "DONE") {
+    lines.push(`Request ID: <code>${flow.request_id}</code>`);
+  }
+  if (note) {
+    lines.push("");
+    lines.push(`⚠️ <i>${note}</i>`);
+  }
+  return lines.join("\n");
+}
+
+async function renderLoadFlow(userId, note) {
+  const flow = userFlows.get(userId);
+  if (!flow || flow.kind !== "LOAD") return;
+  const caption = renderLoadCaption(flow, note);
+  await safeEditCaption(flow.chat_id, flow.message_id, caption, buildLoadStepKeyboard(flow.step));
+}
+
+async function startCashoutFlow(userId) {
+  const chatId = userId;
+  const game = selectedGameForUser(userId);
+  if (!game) {
+    await sendGamePicker(chatId, userId);
+    return;
+  }
+
+  const msg = await withRetry(() =>
+    bot.sendMessage(
+      chatId,
+      [
+        "🟩 <b>Cashout</b>",
+        "Step 1 / 4",
+        "",
+        `🎮 Game: <b>${game}</b>`,
+        "",
+        "Enter your username:",
+      ].join("\n"),
+      { parse_mode: "HTML", reply_markup: buildCashoutStepKeyboard("WAIT_USERNAME") },
+    ),
+  );
+
+  userFlows.set(userId, {
+    kind: "CASHOUT",
+    chat_id: chatId,
+    message_id: msg.message_id,
+    step: "WAIT_USERNAME",
+    game,
+    started_at: isoNow(),
+  });
+}
+
+function renderCashoutText(flow, note) {
+  const lines = [];
+  lines.push("🟩 <b>Cashout</b>");
+  if (flow.step === "WAIT_USERNAME") lines.push("Step 1 / 4");
+  if (flow.step === "WAIT_AMOUNT") lines.push("Step 2 / 4");
+  if (flow.step === "WAIT_CASHTAG") lines.push("Step 3 / 4");
+  if (flow.step === "WAIT_RECEIVING_QR") lines.push("Step 4 / 4");
+  if (flow.step === "PROCESSING") lines.push("⏳ Processing…");
+  if (flow.step === "DONE") lines.push("✅ Complete");
+  lines.push("");
+  lines.push(`🎮 Game: <b>${flow.game}</b>`);
+  lines.push("");
+  lines.push(`👤 Username: <code>${flow.username || "-"}</code>`);
+  lines.push(`💵 Amount: <b>${typeof flow.amount === "number" ? flow.amount : "-"}</b>`);
+  lines.push(`🏷 Cashtag: <code>${flow.cashtag || "-"}</code>`);
+  lines.push("");
+  if (flow.step === "WAIT_USERNAME") lines.push("Enter your username:");
+  if (flow.step === "WAIT_AMOUNT") lines.push("Enter amount:");
+  if (flow.step === "WAIT_CASHTAG") lines.push("Enter cashtag:");
+  if (flow.step === "WAIT_RECEIVING_QR") {
+    lines.push("Send your <b>receiving QR</b> (photo or document) now.");
+  }
+  if (flow.step === "PROCESSING") {
+    lines.push(`Status: <b>PENDING</b>`);
+    lines.push(`Request ID: <code>${flow.request_id}</code>`);
+  }
+  if (flow.step === "DONE") {
+    lines.push(`Request ID: <code>${flow.request_id}</code>`);
+  }
+  if (note) {
+    lines.push("");
+    lines.push(`⚠️ <i>${note}</i>`);
+  }
+  return lines.join("\n");
+}
+
+async function renderCashoutFlow(userId, note) {
+  const flow = userFlows.get(userId);
+  if (!flow || flow.kind !== "CASHOUT") return;
+  await safeEditText(flow.chat_id, flow.message_id, renderCashoutText(flow, note), buildCashoutStepKeyboard(flow.step));
+}
+
+async function cancelUserFlow(userId, reason) {
+  const flow = userFlows.get(userId);
+  if (!flow) return;
+  const text = [
+    "✖ <b>Cancelled</b>",
+    "",
+    reason ? `Reason: <i>${reason}</i>` : "",
+  ].filter(Boolean).join("\n");
+  if (flow.kind === "LOAD") await safeEditCaption(flow.chat_id, flow.message_id, text, buildMainMenuKeyboard());
+  else await safeEditText(flow.chat_id, flow.message_id, text, buildMainMenuKeyboard());
+  userFlows.delete(userId);
+}
+
+async function finishUserFlowToMenu(userId, kind) {
+  const flow = userFlows.get(userId);
+  if (!flow) return;
+  const text = renderMainMenuText(userId);
+  if (kind === "LOAD") await safeEditCaption(flow.chat_id, flow.message_id, text, buildMainMenuKeyboard());
+  else await safeEditText(flow.chat_id, flow.message_id, text, buildMainMenuKeyboard());
+  userFlows.delete(userId);
+}
+
+// =========================
+// ACCOUNT INVENTORY (FIFO ASSIGNMENT)
+// =========================
+async function assignAccountToUser(userId, gameId) {
+  const key = makeUserGameKey(userId, gameId);
+  const already = assignedByUserGame.get(key);
+  if (already) return { ok: true, already: true, account: already };
+
+  if (!userEmail(userId)) {
+    return { ok: false, needsEmail: true };
+  }
+
+  const q = ensureQueue(gameId);
+  if (q.length === 0) return { ok: false, none: true };
+
+  const inventoryMsgId = q[0];
+  const acc = accountsByMsgId.get(inventoryMsgId);
+  if (!acc || acc.status !== "AVAILABLE") {
+    queueRemove(gameId, inventoryMsgId);
+    return { ok: false, none: q.length === 0 };
+  }
+
+  const assignedAt = isoNow();
+  const newText = formatAccountAssignedLine(acc.game, acc.username, acc.password, userId, assignedAt);
+
+  // Only edit bot-sent canonical inventory messages
+  const edited = await safeEditText(ADMIN_GROUP_ID, inventoryMsgId, newText, null);
+  if (!edited) {
+    return { ok: false, editFailed: true };
+  }
+
+  // Update memory
+  acc.status = "ASSIGNED";
+  acc.assigned_to = userId;
+  acc.assigned_at = assignedAt;
+  accountsByMsgId.set(inventoryMsgId, acc);
+  queueRemove(gameId, inventoryMsgId);
+
+  const assignRec = { inventory_message_id: inventoryMsgId, username: acc.username, password: acc.password, assigned_at: assignedAt };
+  assignedByUserGame.set(key, assignRec);
+
+  await logAccountAssignment(userId, gameId, acc, inventoryMsgId);
+  await writeSnapshot();
+  return { ok: true, already: false, account: assignRec };
+}
+
+// =========================
+// APPROVAL SYSTEM
+// =========================
+function newRequestId(prefix) {
+  const a = Date.now().toString(36);
+  const b = Math.random().toString(36).slice(2, 6);
+  return `${prefix}${a}${b}`;
+}
+
+function approvalCaption(req) {
+  const lines = [];
+  lines.push(req.type === "LOAD" ? "🟦 <b>LOAD APPROVAL</b>" : "🟩 <b>CASHOUT APPROVAL</b>");
+  lines.push("");
+  lines.push(`Request ID: <code>${req.request_id}</code>`);
+  lines.push(`Game: <b>${req.game}</b>`);
+  lines.push(`User ID: <code>${req.user_id}</code>`);
+  lines.push(`Username: <code>${req.username}</code>`);
+  lines.push(`Amount: <b>${req.amount}</b>`);
+  if (req.type === "CASHOUT") lines.push(`Cashtag: <code>${req.cashtag || "-"}</code>`);
+  lines.push("");
+  lines.push(`Status: <b>${req.status}</b>`);
+  if (req.status !== "PENDING") {
+    lines.push(`Decision: <b>${req.status}</b>`);
+    lines.push(`Reason: <code>${req.reason || "-"}</code>`);
+    lines.push(`Approved by: <code>${req.decision_by || "-"}</code>`);
+    lines.push(`Timestamp: <code>${req.decision_at || "-"}</code>`);
+  }
+  return lines.join("\n");
+}
+
+async function submitLoadForApproval(flow, screenshotFileId) {
+  const requestId = newRequestId("L");
+  const req = {
+    request_id: requestId,
+    type: "LOAD",
+    game: flow.game,
+    user_id: flow.chat_id,
+    username: flow.username,
+    amount: flow.amount,
+    created_at: isoNow(),
+    status: "PENDING",
+    screenshot_file_id: screenshotFileId,
+    user_flow_chat_id: flow.chat_id,
+    user_flow_message_id: flow.message_id,
+  };
+  approvalRequests.set(requestId, req);
+
+  const caption = approvalCaption(req);
+  const sent = await sendToTopicPhoto(TOPIC_THREAD_IDS.LOAD_APPROVALS, screenshotFileId, caption, {
+    reply_markup: buildAdminApproveRejectKeyboard(requestId),
+  });
+
+  req.approvals_topic_message_id = sent.message_id;
+  req.approvals_topic_thread_id = TOPIC_THREAD_IDS.LOAD_APPROVALS;
+  approvalRequests.set(requestId, req);
+  await writeSnapshot();
+  return requestId;
+}
+
+async function submitCashoutForApproval(flow, receivingQr) {
+  const requestId = newRequestId("C");
+  const req = {
+    request_id: requestId,
+    type: "CASHOUT",
+    game: flow.game,
+    user_id: flow.chat_id,
+    username: flow.username,
+    amount: flow.amount,
+    cashtag: flow.cashtag,
+    created_at: isoNow(),
+    status: "PENDING",
+    receiving_qr_file_id: receivingQr.file_id,
+    receiving_qr_type: receivingQr.type,
+    user_flow_chat_id: flow.chat_id,
+    user_flow_message_id: flow.message_id,
+  };
+  approvalRequests.set(requestId, req);
+
+  const caption = approvalCaption(req);
+  const sent =
+    receivingQr.type === "photo"
+      ? await sendToTopicPhoto(TOPIC_THREAD_IDS.WITHDRAW_APPROVALS, receivingQr.file_id, caption, {
+          reply_markup: buildAdminApproveRejectKeyboard(requestId),
+        })
+      : await sendToTopicDocument(TOPIC_THREAD_IDS.WITHDRAW_APPROVALS, receivingQr.file_id, caption, {
+          reply_markup: buildAdminApproveRejectKeyboard(requestId),
+        });
+
+  req.approvals_topic_message_id = sent.message_id;
+  req.approvals_topic_thread_id = TOPIC_THREAD_IDS.WITHDRAW_APPROVALS;
+  approvalRequests.set(requestId, req);
+  await writeSnapshot();
+  return requestId;
+}
+
+async function finalizeDecision(requestId, decision, decidedBy, reason) {
+  const req = approvalRequests.get(requestId);
+  if (!req) return { ok: false, notFound: true };
+  if (req.status !== "PENDING") return { ok: false, already: true };
+
+  req.status = decision;
+  req.decision_by = decidedBy;
+  req.decision_at = isoNow();
+  req.reason = reason || (decision === "REJECTED" ? "No reason provided" : undefined);
+  approvalRequests.set(requestId, req);
+
+  // Remove buttons and write final caption/text in approvals topic
+  const msgId = req.approvals_topic_message_id;
+  if (msgId) {
+    const cap = approvalCaption(req);
+    // Determine whether approvals message is photo/document/text: we only have message_id; safe approach is edit caption first, then markup.
+    await safeEditCaption(ADMIN_GROUP_ID, msgId, cap, { inline_keyboard: [] });
+    await safeEditReplyMarkup(ADMIN_GROUP_ID, msgId, { inline_keyboard: [] });
+  }
+
+  // Update user single-message flow
+  if (req.user_flow_chat_id && req.user_flow_message_id) {
+    const userId = req.user_flow_chat_id;
+    const flow = userFlows.get(userId);
+    // If flow still active, update it; otherwise, still try to edit the original message (one-message requirement still holds).
+    const flowKind = req.type === "LOAD" ? "LOAD" : "CASHOUT";
+    const finalText =
+      decision === "APPROVED"
+        ? ["✅ <b>Approved</b>", "", `Request ID: <code>${requestId}</code>`, `Timestamp: <code>${req.decision_at}</code>`].join("\n")
+        : [
+            "❌ <b>Rejected</b>",
+            "",
+            `Request ID: <code>${requestId}</code>`,
+            `Reason: <code>${req.reason || "-"}</code>`,
+            `Timestamp: <code>${req.decision_at}</code>`,
+          ].join("\n");
+
+    if (flowKind === "LOAD") {
+      await safeEditCaption(userId, req.user_flow_message_id, finalText, buildLoadStepKeyboard("DONE"));
+    } else {
+      await safeEditText(userId, req.user_flow_message_id, finalText, buildCashoutStepKeyboard("DONE"));
+    }
+
+    if (flow && flow.request_id === requestId) {
+      flow.step = "DONE";
+      userFlows.set(userId, flow);
+    }
+  }
+
+  await logTransaction(req);
+  await writeSnapshot();
+  return { ok: true };
+}
+
+// =========================
+// MANAGE GAMES (TELEGRAM MESSAGES AS SOURCE OF TRUTH)
+// =========================
+async function upsertCanonicalGameFromParsed(parsed, sourceUserLabel) {
+  const existing = gamesById.get(parsed.id);
+  if (!existing) {
+    // Create canonical bot-sent record in MANAGE_GAMES topic
+    const line = formatGameLine(parsed);
+    const sent = await sendToTopicText(TOPIC_THREAD_IDS.MANAGE_GAMES, line, {
+      reply_markup: buildAdminGameControlsKeyboard(parsed.id, parsed.status),
+    });
+    gamesById.set(parsed.id, { ...parsed, message_id: sent.message_id });
+    await sendToTopicText(
+      TOPIC_THREAD_IDS.TRANSACTION_LOGS,
+      ["🎮 <b>GAME CREATED</b>", `By: <code>${sourceUserLabel}</code>`, `Game: <code>${parsed.id}</code>`, `Timestamp: <code>${isoNow()}</code>`].join("\n"),
+    );
+    await writeSnapshot();
+    return;
+  }
+
+  // Update canonical bot-sent record
+  const line = formatGameLine(parsed);
+  await safeEditText(ADMIN_GROUP_ID, existing.message_id, line, buildAdminGameControlsKeyboard(parsed.id, parsed.status));
+  gamesById.set(parsed.id, { ...parsed, message_id: existing.message_id });
+  await sendToTopicText(
+    TOPIC_THREAD_IDS.TRANSACTION_LOGS,
+    ["🎮 <b>GAME UPDATED</b>", `By: <code>${sourceUserLabel}</code>`, `Game: <code>${parsed.id}</code>`, `Timestamp: <code>${isoNow()}</code>`].join("\n"),
+  );
+  await writeSnapshot();
+}
+
+async function syncDefaultGamesIfFirstBoot(hadState) {
+  if (hadState && gamesById.size > 0) return;
+  // First boot: push DEFAULT_GAMES into MANAGE_GAMES as canonical messages
+  for (const g of DEFAULT_GAMES) {
+    if (gamesById.has(g.id)) continue;
+    const sent = await sendToTopicText(TOPIC_THREAD_IDS.MANAGE_GAMES, formatGameLine(g), {
+      reply_markup: buildAdminGameControlsKeyboard(g.id, g.status),
+    });
+    gamesById.set(g.id, { ...g, message_id: sent.message_id });
+  }
+  await writeSnapshot();
+}
+
+// =========================
+// PAYMENT CONFIG (PAYMENT_QR records)
+// =========================
+async function upsertPaymentQr(gameId, media) {
+  const existing = paymentQRs.get(gameId);
+  const caption = `PAYMENT_QR | game=${gameId}`;
+
+  if (!existing) {
+    const sent =
+      media.type === "photo"
+        ? await sendToTopicPhoto(TOPIC_THREAD_IDS.PAYMENT_CONFIG, media.file_id, caption)
+        : await sendToTopicDocument(TOPIC_THREAD_IDS.PAYMENT_CONFIG, media.file_id, caption);
+    paymentQRs.set(gameId, { game: gameId, type: media.type, file_id: media.file_id, message_id: sent.message_id });
+    await sendToTopicText(
+      TOPIC_THREAD_IDS.TRANSACTION_LOGS,
+      ["💳 <b>PAYMENT QR SET</b>", `Game: <b>${gameId}</b>`, `Msg ID: <code>${sent.message_id}</code>`, `Timestamp: <code>${isoNow()}</code>`].join("\n"),
+    );
+    await writeSnapshot();
+    return;
+  }
+
+  // Update canonical record by editing media (bot-sent only)
+  const inputMedia =
+    media.type === "photo"
+      ? { type: "photo", media: media.file_id, caption, parse_mode: "HTML" }
+      : { type: "document", media: media.file_id, caption, parse_mode: "HTML" };
+
+  await safeEditMedia(ADMIN_GROUP_ID, existing.message_id, inputMedia, undefined);
+  paymentQRs.set(gameId, { game: gameId, type: media.type, file_id: media.file_id, message_id: existing.message_id });
+  await sendToTopicText(
+    TOPIC_THREAD_IDS.TRANSACTION_LOGS,
+    ["💳 <b>PAYMENT QR UPDATED</b>", `Game: <b>${gameId}</b>`, `Msg ID: <code>${existing.message_id}</code>`, `Timestamp: <code>${isoNow()}</code>`].join("\n"),
+  );
+  await writeSnapshot();
+}
+
+// =========================
+// INGEST "TABLE" INPUTS (ADMIN POSTS)
+// =========================
+async function handleManageGamesTopicMessage(msg) {
+  if (!msg.text) return;
+  const parsed = parseGameMessage(msg.text);
+  if (!parsed) return;
+
+  // Admins can post; bot converts into canonical bot message (never deletes admin post).
+  const ok = await isAdmin(msg.from.id);
+  if (!ok) return;
+
+  await upsertCanonicalGameFromParsed(parsed, adminIdentity(msg.from));
+}
+
+async function handleAccountInventoryTopicMessage(msg) {
+  if (!msg.text) return;
+  const parsed = parseAccountMessage(msg.text);
+  if (!parsed) return;
+  const ok = await isAdmin(msg.from.id);
+  if (!ok) return;
+
+  // Create canonical bot-sent inventory record (so it can be edited later).
+  if (msg.from.id === BOT_ID) {
+    // Canonical messages are bot-sent; ingest them into memory for FIFO assignment.
+    accountsByMsgId.set(msg.message_id, parsed);
+    if (parsed.status === "AVAILABLE") queueAddAvailable(parsed.game, msg.message_id);
+    else queueRemove(parsed.game, msg.message_id);
+    await writeSnapshot();
+    return;
+  }
+
+  // Admin posted inventory line -> bot writes canonical record in the same topic (no deletion).
+  const canonicalText =
+    parsed.status === "AVAILABLE"
+      ? formatAccountAvailableLine(parsed.game, parsed.username, parsed.password)
+      : formatAccountAssignedLine(parsed.game, parsed.username, parsed.password, parsed.assigned_to || 0, parsed.assigned_at || isoNow());
+
+  const sent = await sendToTopicText(TOPIC_THREAD_IDS.ACCOUNT_INVENTORY, canonicalText);
+  accountsByMsgId.set(sent.message_id, parseAccountMessage(canonicalText));
+  if (parseAccountMessage(canonicalText).status === "AVAILABLE") queueAddAvailable(parsed.game, sent.message_id);
+  await sendToTopicText(
+    TOPIC_THREAD_IDS.TRANSACTION_LOGS,
+    ["📦 <b>INVENTORY INGESTED</b>", `By: <code>${adminIdentity(msg.from)}</code>`, `Game: <b>${parsed.game}</b>`, `Username: <code>${parsed.username}</code>`, `Timestamp: <code>${isoNow()}</code>`].join("\n"),
+  );
+  await writeSnapshot();
+}
+
+async function handlePaymentConfigTopicMessage(msg) {
+  const ok = await isAdmin(msg.from.id);
+  if (!ok) return;
+
+  const caption = msg.caption || msg.text || "";
+  const kv = parseKVLine(caption, "PAYMENT_QR |");
+  if (!kv || !kv.game) return;
+  const gameId = kv.game;
+
+  const photoFileId = pickBestPhotoFileId(msg.photo);
+  if (photoFileId) {
+    await upsertPaymentQr(gameId, { type: "photo", file_id: photoFileId });
+    return;
+  }
+
+  if (msg.document?.file_id) {
+    await upsertPaymentQr(gameId, { type: "document", file_id: msg.document.file_id });
+  }
+}
+
+// =========================
+// PROMOTIONS & ADMIN→USER MSG (TOPIC-RESTRICTED)
+// =========================
+async function broadcastPromotion(promoText) {
+  const userIds = Array.from(knownUsers.keys());
+  let delivered = 0;
+  let failed = 0;
+  for (const uid of userIds) {
+    try {
+      await withRetry(() =>
+        bot.sendMessage(
+          uid,
+          ["📣 <b>Promotion</b>", "", safeText(promoText)].join("\n"),
+          { parse_mode: "HTML", disable_web_page_preview: true },
+        ),
+      );
+      delivered++;
+    } catch {
+      failed++;
+    }
+  }
+  await logPromotion(promoText, { known: userIds.length, delivered, failed });
+}
+
+async function handlePromoCommand(msg) {
+  if (!mustBeTopic(msg, TOPIC_THREAD_IDS.PROMOTIONS)) return;
+  const ok = await isAdmin(msg.from.id);
+  if (!ok) return;
+
+  const text = safeText(msg.text);
+  const args = text.replace(/^\/promo\b/i, "").trim();
+  if (args) {
+    await broadcastPromotion(args);
+    return;
+  }
+
+  adminInputs.set(msg.from.id, { kind: "PROMO_TEXT" });
+  await sendToTopicText(
+    TOPIC_THREAD_IDS.PROMOTIONS,
+    ["📣 <b>/promo</b>", "Send the promotion text as your next message in this topic."].join("\n"),
+  );
+}
+
+async function handleMsgUserCommand(msg) {
+  if (!mustBeTopic(msg, TOPIC_THREAD_IDS.ADMIN_USER_MSGS)) return;
+  const ok = await isAdmin(msg.from.id);
+  if (!ok) return;
+
+  const text = safeText(msg.text);
+  const args = text.replace(/^\/msguser\b/i, "").trim();
+  const parts = args.split(/\s+/).filter(Boolean);
+
+  if (parts.length >= 2 && /^\d+$/.test(parts[0])) {
+    const targetUserId = Number(parts[0]);
+    const msgText = args.slice(parts[0].length).trim();
+    let result = "SENT";
+    try {
+      await withRetry(() => bot.sendMessage(targetUserId, msgText));
+    } catch (e) {
+      result = `FAILED: ${safeText(e?.message)}`;
+    }
+    await logAdminUserMsg(msg.from, targetUserId, msgText, result);
+    return;
+  }
+
+  adminInputs.set(msg.from.id, { kind: "MSGUSER_USERID" });
+  await sendToTopicText(
+    TOPIC_THREAD_IDS.ADMIN_USER_MSGS,
+    ["✉️ <b>/msguser</b>", "Step 1 / 2", "Send the <b>User ID</b> as your next message in this topic."].join("\n"),
+  );
+}
+
+// =========================
+// ROUTING: MESSAGES
+// =========================
 bot.on("message", async (msg) => {
   try {
-    if (isAdminGroup(msg)) {
-      await ingestAdminGroupMessage(msg);
-      // bot doesn't chat in group unless you later add admin-only commands
+    // Track known users on any private interaction
+    if (isPrivate(msg) && msg.from?.id) {
+      const uid = msg.from.id;
+      const now = isoNow();
+      if (!knownUsers.has(uid)) {
+        knownUsers.set(uid, {
+          user_id: uid,
+          username: msg.from.username || undefined,
+          first_name: msg.from.first_name || undefined,
+          last_name: msg.from.last_name || undefined,
+          first_seen: now,
+          last_seen: now,
+          selected_game: null,
+          email: null,
+        });
+        await writeSnapshot();
+      } else {
+        const u = knownUsers.get(uid);
+        u.username = msg.from.username || u.username;
+        u.first_name = msg.from.first_name || u.first_name;
+        u.last_name = msg.from.last_name || u.last_name;
+        u.last_seen = now;
+        knownUsers.set(uid, u);
+      }
+    }
+
+    // PRIVATE CHAT COMMANDS
+    if (isPrivate(msg)) {
+      if (safeText(msg.text).trim() === "/start") {
+        const uid = msg.from.id;
+        const game = selectedGameForUser(uid);
+        if (!game) await sendGamePicker(uid, uid);
+        else await sendMainMenu(uid, uid);
+        await writeSnapshot();
+        return;
+      }
+
+      // Private flow input handling (user messages are allowed; bot must not send extra messages during load/cashout)
+      const uid = msg.from.id;
+      const flow = userFlows.get(uid);
+      if (flow) {
+        if (flow.kind === "EMAIL") {
+          if (msg.text) {
+            const e = msg.text.trim();
+            if (!validateEmail(e)) {
+              await renderEmailFlow(uid, "Invalid email format. Try again.");
+              return;
+            }
+            setUserEmail(uid, e);
+            await logEmail(uid, e);
+            await writeSnapshot();
+            await finishEmailFlow(uid);
+            return;
+          }
+          await renderEmailFlow(uid, "Please send a text email address.");
+          return;
+        }
+
+        if (flow.kind === "LOAD") {
+          if (flow.step === "WAIT_USERNAME") {
+            if (!msg.text) {
+              await renderLoadFlow(uid, "Please send your username as text.");
+              return;
+            }
+            flow.username = msg.text.trim();
+            flow.step = "WAIT_AMOUNT";
+            userFlows.set(uid, flow);
+            await renderLoadFlow(uid);
+            return;
+          }
+
+          if (flow.step === "WAIT_AMOUNT") {
+            if (!msg.text) {
+              await renderLoadFlow(uid, "Please send the amount as text.");
+              return;
+            }
+            const amt = normalizeAmount(msg.text.trim());
+            if (amt === null) {
+              await renderLoadFlow(uid, "Invalid amount. Enter a number greater than 0.");
+              return;
+            }
+            flow.amount = amt;
+            flow.step = "QR_WAIT_PAID";
+            userFlows.set(uid, flow);
+            await renderLoadFlow(uid);
+            return;
+          }
+
+          if (flow.step === "WAIT_SCREENSHOT") {
+            const fileId = pickBestPhotoFileId(msg.photo);
+            if (!fileId) {
+              await renderLoadFlow(uid, "Send a payment screenshot as a photo.");
+              return;
+            }
+            flow.paid_screenshot_file_id = fileId;
+            flow.step = "PROCESSING";
+            userFlows.set(uid, flow);
+
+            const requestId = await submitLoadForApproval(flow, fileId);
+            flow.request_id = requestId;
+            userFlows.set(uid, flow);
+            await renderLoadFlow(uid);
+            return;
+          }
+
+          return;
+        }
+
+        if (flow.kind === "CASHOUT") {
+          if (flow.step === "WAIT_USERNAME") {
+            if (!msg.text) {
+              await renderCashoutFlow(uid, "Please send your username as text.");
+              return;
+            }
+            flow.username = msg.text.trim();
+            flow.step = "WAIT_AMOUNT";
+            userFlows.set(uid, flow);
+            await renderCashoutFlow(uid);
+            return;
+          }
+
+          if (flow.step === "WAIT_AMOUNT") {
+            if (!msg.text) {
+              await renderCashoutFlow(uid, "Please send the amount as text.");
+              return;
+            }
+            const amt = normalizeAmount(msg.text.trim());
+            if (amt === null) {
+              await renderCashoutFlow(uid, "Invalid amount. Enter a number greater than 0.");
+              return;
+            }
+            flow.amount = amt;
+            flow.step = "WAIT_CASHTAG";
+            userFlows.set(uid, flow);
+            await renderCashoutFlow(uid);
+            return;
+          }
+
+          if (flow.step === "WAIT_CASHTAG") {
+            if (!msg.text) {
+              await renderCashoutFlow(uid, "Please send the cashtag as text.");
+              return;
+            }
+            flow.cashtag = msg.text.trim();
+            flow.step = "WAIT_RECEIVING_QR";
+            userFlows.set(uid, flow);
+            await renderCashoutFlow(uid);
+            return;
+          }
+
+          if (flow.step === "WAIT_RECEIVING_QR") {
+            const photoId = pickBestPhotoFileId(msg.photo);
+            if (photoId) {
+              flow.receiving_qr_file_id = photoId;
+              flow.receiving_qr_type = "photo";
+            } else if (msg.document?.file_id) {
+              flow.receiving_qr_file_id = msg.document.file_id;
+              flow.receiving_qr_type = "document";
+            } else {
+              await renderCashoutFlow(uid, "Send your receiving QR as a photo or document.");
+              return;
+            }
+            flow.step = "PROCESSING";
+            userFlows.set(uid, flow);
+
+            const requestId = await submitCashoutForApproval(flow, {
+              type: flow.receiving_qr_type,
+              file_id: flow.receiving_qr_file_id,
+            });
+            flow.request_id = requestId;
+            userFlows.set(uid, flow);
+            await renderCashoutFlow(uid);
+            return;
+          }
+
+          return;
+        }
+      }
+
+      // If no flow, ignore free text (menu is inline keyboard driven)
       return;
     }
 
-    if (isPrivateChat(msg)) {
-      await handleUserMessage(msg);
-      return;
+    // ADMIN GROUP TOPIC INGEST
+    if (isAdminGroupMessage(msg)) {
+      const threadId = getThreadId(msg);
+      if (threadId === TOPIC_THREAD_IDS.MANAGE_GAMES) {
+        await handleManageGamesTopicMessage(msg);
+        return;
+      }
+      if (threadId === TOPIC_THREAD_IDS.ACCOUNT_INVENTORY) {
+        await handleAccountInventoryTopicMessage(msg);
+        return;
+      }
+      if (threadId === TOPIC_THREAD_IDS.PAYMENT_CONFIG) {
+        await handlePaymentConfigTopicMessage(msg);
+        return;
+      }
+
+      // Topic restricted commands
+      if (msg.text && msg.text.trim().toLowerCase().startsWith("/promo")) {
+        await handlePromoCommand(msg);
+        return;
+      }
+      if (msg.text && msg.text.trim().toLowerCase().startsWith("/msguser")) {
+        await handleMsgUserCommand(msg);
+        return;
+      }
+
+      // Admin input capture
+      const ai = adminInputs.get(msg.from.id);
+      if (ai) {
+        if (ai.kind === "PROMO_TEXT") {
+          if (!mustBeTopic(msg, TOPIC_THREAD_IDS.PROMOTIONS)) return;
+          adminInputs.delete(msg.from.id);
+          const promoText = msg.text || msg.caption || "";
+          if (!promoText.trim()) return;
+          await broadcastPromotion(promoText.trim());
+          return;
+        }
+
+        if (ai.kind === "MSGUSER_USERID") {
+          if (!mustBeTopic(msg, TOPIC_THREAD_IDS.ADMIN_USER_MSGS)) return;
+          if (!msg.text || !/^\d+$/.test(msg.text.trim())) {
+            await sendToTopicText(TOPIC_THREAD_IDS.ADMIN_USER_MSGS, "⚠️ Please send a numeric User ID.");
+            return;
+          }
+          const targetUserId = Number(msg.text.trim());
+          adminInputs.set(msg.from.id, { kind: "MSGUSER_TEXT", target_user_id: targetUserId });
+          await sendToTopicText(
+            TOPIC_THREAD_IDS.ADMIN_USER_MSGS,
+            ["✉️ <b>/msguser</b>", "Step 2 / 2", `Target User ID: <code>${targetUserId}</code>`, "Send the message text as your next message."].join("\n"),
+          );
+          return;
+        }
+
+        if (ai.kind === "MSGUSER_TEXT") {
+          if (!mustBeTopic(msg, TOPIC_THREAD_IDS.ADMIN_USER_MSGS)) return;
+          adminInputs.delete(msg.from.id);
+          const msgText = (msg.text || msg.caption || "").trim();
+          if (!msgText) return;
+          let result = "SENT";
+          try {
+            await withRetry(() => bot.sendMessage(ai.target_user_id, msgText));
+          } catch (e) {
+            result = `FAILED: ${safeText(e?.message)}`;
+          }
+          await logAdminUserMsg(msg.from, ai.target_user_id, msgText, result);
+          return;
+        }
+
+        if (ai.kind === "REJECT_REASON") {
+          // Reason must be in approvals topic thread, from same admin who clicked Reject
+          if (getThreadId(msg) !== ai.topic_thread_id) return;
+          const reason = (msg.text || "").trim();
+          if (!reason) return;
+          adminInputs.delete(msg.from.id);
+          await finalizeDecision(ai.request_id, "REJECTED", adminIdentity(msg.from), reason);
+          return;
+        }
+      }
     }
   } catch (e) {
     console.error("message handler error:", e);
   }
 });
 
-bot.on("callback_query", async (cbq) => {
+// =========================
+// ROUTING: EDITED MESSAGES (Telegram source of truth)
+// =========================
+bot.on("edited_message", async (msg) => {
   try {
-    const data = cbq.data || "";
-    const chat = cbq.message?.chat;
-
-    if (!chat) return;
-
-    // Admin callbacks
-    if (chat.id === ADMIN_GROUP_ID && data.startsWith("A|")) {
-      return handleAdminCallback(cbq);
+    if (!isAdminGroupMessage(msg)) return;
+    const threadId = getThreadId(msg);
+    if (threadId === TOPIC_THREAD_IDS.MANAGE_GAMES && msg.text && msg.from?.id === BOT_ID) {
+      const parsed = parseGameMessage(msg.text);
+      if (!parsed) return;
+      const existing = gamesById.get(parsed.id);
+      if (existing && existing.message_id === msg.message_id) {
+        gamesById.set(parsed.id, { ...parsed, message_id: msg.message_id });
+        await writeSnapshot();
+      }
+      return;
     }
-
-    // User callbacks
-    if (chat.type === "private" && data.startsWith("U|")) {
-      return handleUserCallback(cbq);
+    if (threadId === TOPIC_THREAD_IDS.ACCOUNT_INVENTORY && msg.text && msg.from?.id === BOT_ID) {
+      const parsed = parseAccountMessage(msg.text);
+      if (!parsed) return;
+      accountsByMsgId.set(msg.message_id, parsed);
+      if (parsed.status === "AVAILABLE") queueAddAvailable(parsed.game, msg.message_id);
+      else queueRemove(parsed.game, msg.message_id);
+      await writeSnapshot();
+      return;
     }
-
-    // Fallback
-    await safeAnswerCallbackQuery(cbq.id, "Not supported here");
   } catch (e) {
-    console.error("callback handler error:", e);
+    console.error("edited_message handler error:", e);
   }
 });
 
-// ===================== STARTUP LOG =====================
-(async () => {
-  const me = await bot.getMe();
-  console.log(`✅ Bot started: @${me.username}`);
-  console.log(`✅ Admin group ID: ${ADMIN_GROUP_ID}`);
-  console.log(`✅ Games: ${GAMES.map(g => g.id).join(", ")}`);
+// =========================
+// ROUTING: CALLBACK QUERIES (INLINE KEYBOARDS ONLY)
+// =========================
+bot.on("callback_query", async (q) => {
+  try {
+    const data = safeText(q.data);
+    const parts = parseCb(data);
+    const fromId = q.from?.id;
 
-  if (!PAYMENT_QR_FILE_ID) {
-    console.log("⚠️ PAYMENT_QR_FILE_ID not set. Load flow will warn user.");
+    // USER callbacks (private chat)
+    if (parts[0] === "U") {
+      if (!q.message || q.message.chat.type !== "private") {
+        await answerCb(q.id, "Use this in private chat.");
+        return;
+      }
+
+      const userId = fromId;
+      if (parts[1] === "REFRESH_GAMES") {
+        await answerCb(q.id, "Refreshing…");
+        await safeEditText(q.message.chat.id, q.message.message_id, renderGamePickerText(userId), buildGamePickerKeyboard());
+        return;
+      }
+
+      if (parts[1] === "GAME") {
+        const gameId = parts[2];
+        const g = gamesById.get(gameId);
+        if (!g || g.status !== "ACTIVE") {
+          await answerCbAlert(q.id, "That game is not available.");
+          return;
+        }
+        setSelectedGameForUser(userId, gameId);
+        await writeSnapshot();
+        await answerCb(q.id, `Selected ${g.name}`);
+        await safeEditText(q.message.chat.id, q.message.message_id, renderMainMenuText(userId), buildMainMenuKeyboard());
+        return;
+      }
+
+      if (parts[1] === "MENU") {
+        const action = parts[2];
+        await answerCb(q.id, "OK");
+
+        if (action === "CHANGE_GAME") {
+          await safeEditText(q.message.chat.id, q.message.message_id, renderGamePickerText(userId), buildGamePickerKeyboard());
+          return;
+        }
+
+        const game = selectedGameForUser(userId);
+        if (!game) {
+          await safeEditText(q.message.chat.id, q.message.message_id, renderGamePickerText(userId), buildGamePickerKeyboard());
+          return;
+        }
+
+        if (action === "VIEW") {
+          await safeEditText(q.message.chat.id, q.message.message_id, renderViewAccountText(userId), buildMainMenuKeyboard());
+          return;
+        }
+
+        if (action === "REGISTER") {
+          const res = await assignAccountToUser(userId, game);
+          if (res.needsEmail) {
+            await startEmailFlow(userId);
+            return;
+          }
+          if (res.none) {
+            await safeEditText(
+              q.message.chat.id,
+              q.message.message_id,
+              ["🧾 <b>Register Account</b>", "", `🎮 Game: <b>${game}</b>`, "", "Status: <b>NO ACCOUNTS AVAILABLE</b>", "Please try again later."].join("\n"),
+              buildMainMenuKeyboard(),
+            );
+            return;
+          }
+          if (res.editFailed) {
+            await safeEditText(
+              q.message.chat.id,
+              q.message.message_id,
+              ["🧾 <b>Register Account</b>", "", "⚠️ Failed to assign (inventory edit failed). Please contact admin."].join("\n"),
+              buildMainMenuKeyboard(),
+            );
+            return;
+          }
+          await safeEditText(
+            q.message.chat.id,
+            q.message.message_id,
+            [
+              "🧾 <b>Register Account</b>",
+              "",
+              `🎮 Game: <b>${game}</b>`,
+              "",
+              res.already ? "Status: <b>ALREADY ASSIGNED</b>" : "Status: <b>ASSIGNED</b>",
+              `Username: <code>${res.account.username}</code>`,
+              `Password: <code>${res.account.password}</code>`,
+              `Assigned At: <code>${res.account.assigned_at}</code>`,
+            ].join("\n"),
+            buildMainMenuKeyboard(),
+          );
+          return;
+        }
+
+        if (action === "LOAD") {
+          await startLoadFlow(userId);
+          return;
+        }
+
+        if (action === "CASHOUT") {
+          await startCashoutFlow(userId);
+          return;
+        }
+      }
+
+      if (parts[1] === "FLOW") {
+        const kind = parts[2];
+        const action = parts[3];
+        const flow = userFlows.get(userId);
+
+        if (action === "CANCEL") {
+          await answerCb(q.id, "Cancelled");
+          await cancelUserFlow(userId, "User cancelled");
+          return;
+        }
+
+        if (action === "MENU") {
+          await answerCb(q.id, "Menu");
+          await finishUserFlowToMenu(userId, kind);
+          return;
+        }
+
+        if (!flow || flow.kind !== kind) {
+          await answerCbAlert(q.id, "No active flow.");
+          return;
+        }
+
+        if (kind === "LOAD") {
+          if (action === "PAID" && flow.step === "QR_WAIT_PAID") {
+            flow.step = "WAIT_SCREENSHOT";
+            userFlows.set(userId, flow);
+            await answerCb(q.id, "Send screenshot");
+            await renderLoadFlow(userId);
+            return;
+          }
+          if (action === "RENDER") {
+            await answerCb(q.id, "Refreshing…");
+            await renderLoadFlow(userId);
+            return;
+          }
+        }
+      }
+
+      await answerCb(q.id, "Unsupported.");
+      return;
+    }
+
+    // ADMIN callbacks (in group)
+    if (parts[0] === "A") {
+      if (!q.message || q.message.chat.id !== ADMIN_GROUP_ID) {
+        await answerCb(q.id, "Admins only.");
+        return;
+      }
+      const ok = await isAdmin(fromId);
+      if (!ok) {
+        await answerCbAlert(q.id, "Admins only.");
+        return;
+      }
+
+      // Game controls
+      if (parts[1] === "GAME") {
+        const gameId = parts[2];
+        const newStatus = parts[3];
+        const g = gamesById.get(gameId);
+        if (!g) {
+          await answerCbAlert(q.id, "Game not found.");
+          return;
+        }
+        const updated = { id: g.id, name: g.name, status: newStatus };
+        await upsertCanonicalGameFromParsed(updated, adminIdentity(q.from));
+        await answerCb(q.id, `Set ${gameId} → ${newStatus}`);
+        return;
+      }
+
+      // Approvals
+      if (parts[1] === "APP") {
+        const action = parts[2];
+        const requestId = parts[3];
+        const req = approvalRequests.get(requestId);
+        if (!req) {
+          await answerCbAlert(q.id, "Request not found.");
+          await safeEditReplyMarkup(ADMIN_GROUP_ID, q.message.message_id, { inline_keyboard: [] });
+          return;
+        }
+        if (req.status !== "PENDING") {
+          await answerCbAlert(q.id, "Already handled.");
+          await safeEditReplyMarkup(ADMIN_GROUP_ID, q.message.message_id, { inline_keyboard: [] });
+          return;
+        }
+
+        if (action === "OK") {
+          await answerCb(q.id, "Approved");
+          await finalizeDecision(requestId, "APPROVED", adminIdentity(q.from), "");
+          return;
+        }
+
+        if (action === "NO") {
+          // Reject requires reason: capture via admin's next message in the same approvals topic
+          await answerCb(q.id, "Enter reason in topic");
+          adminInputs.set(fromId, {
+            kind: "REJECT_REASON",
+            request_id: requestId,
+            topic_thread_id: req.approvals_topic_thread_id,
+            approvals_message_id: q.message.message_id,
+          });
+
+          const prompt = [
+            "❌ <b>Rejecting…</b>",
+            "",
+            `Request ID: <code>${requestId}</code>`,
+            "",
+            "Send the <b>rejection reason</b> as your next message in this topic.",
+          ].join("\n");
+
+          // Keep the approval message but replace buttons with cancel reject
+          if (q.message.caption) await safeEditCaption(ADMIN_GROUP_ID, q.message.message_id, prompt, buildAdminRejectCancelKeyboard(requestId));
+          else await safeEditText(ADMIN_GROUP_ID, q.message.message_id, prompt, buildAdminRejectCancelKeyboard(requestId));
+          return;
+        }
+
+        if (action === "RC") {
+          await answerCb(q.id, "Cancelled");
+          adminInputs.delete(fromId);
+          // Restore original buttons and caption
+          const cap = approvalCaption(req);
+          if (q.message.caption) await safeEditCaption(ADMIN_GROUP_ID, q.message.message_id, cap, buildAdminApproveRejectKeyboard(requestId));
+          else await safeEditText(ADMIN_GROUP_ID, q.message.message_id, cap, buildAdminApproveRejectKeyboard(requestId));
+          return;
+        }
+      }
+
+      await answerCb(q.id, "Unsupported.");
+      return;
+    }
+  } catch (e) {
+    console.error("callback_query handler error:", e);
   }
-})();
+});
+
+// =========================
+// STARTUP / HEALTHCHECK
+// =========================
+async function startup() {
+  const me = await bot.getMe();
+  BOT_ID = me.id;
+  BOT_USERNAME = me.username || null;
+
+  validateTopicThreadIdsOrExit();
+
+  // Ensure bot is admin in group
+  const botMember = await bot.getChatMember(ADMIN_GROUP_ID, BOT_ID);
+  if (!botMember || (botMember.status !== "administrator" && botMember.status !== "creator")) {
+    console.error("❌ Bot must be ADMIN in the supergroup.");
+    process.exit(1);
+  }
+
+  // Forum topics check (best-effort)
+  try {
+    const chat = await bot.getChat(ADMIN_GROUP_ID);
+    if (!chat?.is_forum) {
+      console.warn("⚠️ Group does not report is_forum=true. Forum Topics must be enabled.");
+    }
+  } catch {
+    // ignore
+  }
+
+  const hadState = await rehydrateOnStartup();
+  await syncDefaultGamesIfFirstBoot(hadState);
+
+  // Periodic snapshots
+  setInterval(async () => {
+    try {
+      await writeSnapshot();
+    } catch (e) {
+      console.warn("Periodic snapshot failed:", safeText(e?.message));
+    }
+  }, SNAPSHOT_INTERVAL_MS);
+
+  console.log(`✅ Bot started (polling): @${BOT_USERNAME || "unknown"} (${BOT_ID})`);
+  console.log(`✅ Admin group: ${ADMIN_GROUP_ID}`);
+}
+
+startup().catch((e) => {
+  console.error("Startup failed:", e);
+  process.exit(1);
+});
+
+// =========================
+// GRACEFUL SHUTDOWN
+// =========================
+async function shutdown(sig) {
+  try {
+    console.log(`\n⏹ Shutting down (${sig})…`);
+    await writeSnapshot();
+  } catch {
+    // ignore
+  }
+  try {
+    await bot.stopPolling();
+  } catch {
+    // ignore
+  }
+  process.exit(0);
+}
+
+process.on("SIGINT", () => shutdown("SIGINT"));
+process.on("SIGTERM", () => shutdown("SIGTERM"));
