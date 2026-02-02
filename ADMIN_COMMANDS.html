@@ -1,0 +1,656 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Admin Commands Reference</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+            line-height: 1.6;
+        }
+        
+        .container {
+            max-width: 1000px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 12px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+            overflow: hidden;
+        }
+        
+        .header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 40px 30px;
+            text-align: center;
+        }
+        
+        .header h1 {
+            font-size: 2.5em;
+            margin-bottom: 10px;
+            font-weight: 700;
+        }
+        
+        .header p {
+            font-size: 1.1em;
+            opacity: 0.9;
+        }
+        
+        .content {
+            padding: 40px 30px;
+        }
+        
+        .command-section {
+            margin-bottom: 40px;
+        }
+        
+        .section-title {
+            font-size: 1.6em;
+            color: #667eea;
+            margin-bottom: 25px;
+            padding-bottom: 10px;
+            border-bottom: 3px solid #667eea;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        
+        .command-card {
+            background: #f8f9fa;
+            border-left: 5px solid #667eea;
+            padding: 20px;
+            margin-bottom: 20px;
+            border-radius: 8px;
+            transition: all 0.3s ease;
+        }
+        
+        .command-card:hover {
+            box-shadow: 0 5px 20px rgba(102, 126, 234, 0.15);
+            transform: translateX(5px);
+        }
+        
+        .command-name {
+            font-family: 'Monaco', 'Courier New', monospace;
+            font-size: 1.1em;
+            font-weight: 700;
+            color: #333;
+            margin-bottom: 8px;
+        }
+        
+        .command-description {
+            color: #666;
+            margin-bottom: 15px;
+            font-size: 0.95em;
+        }
+        
+        .usage-block {
+            background: white;
+            border: 1px solid #e0e0e0;
+            border-radius: 6px;
+            padding: 15px;
+            margin-bottom: 12px;
+            font-family: 'Monaco', 'Courier New', monospace;
+            font-size: 0.85em;
+            overflow-x: auto;
+            color: #d63031;
+        }
+        
+        .usage-label {
+            font-weight: 700;
+            color: #333;
+            font-family: sans-serif;
+            margin-bottom: 5px;
+        }
+        
+        .notes {
+            background: #fff3cd;
+            border: 1px solid #ffc107;
+            border-radius: 6px;
+            padding: 12px;
+            margin-top: 12px;
+            font-size: 0.9em;
+            color: #856404;
+        }
+        
+        .notes strong {
+            color: #333;
+        }
+        
+        .example {
+            background: #e7f3ff;
+            border: 1px solid #b3d9ff;
+            border-radius: 6px;
+            padding: 12px;
+            margin-top: 12px;
+            font-size: 0.9em;
+            color: #004085;
+        }
+        
+        .example strong {
+            color: #333;
+        }
+        
+        .topic-label {
+            display: inline-block;
+            background: #667eea;
+            color: white;
+            padding: 4px 10px;
+            border-radius: 4px;
+            font-size: 0.8em;
+            font-weight: 700;
+            margin-bottom: 12px;
+            font-family: 'Monaco', 'Courier New', monospace;
+        }
+        
+        .footer {
+            background: #f8f9fa;
+            padding: 20px 30px;
+            text-align: center;
+            color: #666;
+            border-top: 1px solid #e0e0e0;
+            font-size: 0.9em;
+        }
+        
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 15px;
+            background: white;
+            border: 1px solid #e0e0e0;
+            border-radius: 6px;
+            overflow: hidden;
+        }
+        
+        th {
+            background: #667eea;
+            color: white;
+            padding: 12px;
+            text-align: left;
+            font-weight: 700;
+        }
+        
+        td {
+            padding: 12px;
+            border-bottom: 1px solid #e0e0e0;
+            font-size: 0.9em;
+        }
+        
+        tr:last-child td {
+            border-bottom: none;
+        }
+        
+        tr:nth-child(even) {
+            background: #f8f9fa;
+        }
+        
+        .param {
+            font-family: 'Monaco', 'Courier New', monospace;
+            color: #d63031;
+            font-weight: 700;
+        }
+        
+        .required {
+            color: #d63031;
+            font-weight: 700;
+        }
+        
+        .optional {
+            color: #0984e3;
+            font-weight: 700;
+        }
+        
+        code {
+            background: #f0f0f0;
+            padding: 2px 6px;
+            border-radius: 3px;
+            font-family: 'Monaco', 'Courier New', monospace;
+        }
+        
+        .toc {
+            background: #f0f7ff;
+            border: 1px solid #b3d9ff;
+            border-radius: 8px;
+            padding: 20px;
+            margin-bottom: 30px;
+        }
+        
+        .toc h3 {
+            color: #667eea;
+            margin-bottom: 12px;
+        }
+        
+        .toc ul {
+            list-style: none;
+        }
+        
+        .toc li {
+            margin: 8px 0;
+        }
+        
+        .toc a {
+            color: #667eea;
+            text-decoration: none;
+            font-weight: 500;
+        }
+        
+        .toc a:hover {
+            text-decoration: underline;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <!-- Header -->
+        <div class="header">
+            <h1>⚙️ Admin Commands Reference</h1>
+            <p>Complete guide for all administrative commands in the Game Account Manager Bot</p>
+        </div>
+        
+        <!-- Content -->
+        <div class="content">
+            <!-- Table of Contents -->
+            <div class="toc">
+                <h3>📋 Quick Navigation</h3>
+                <ul>
+                    <li><a href="#account-inventory">Account Inventory Management</a></li>
+                    <li><a href="#payment-config">Payment Configuration</a></li>
+                    <li><a href="#approvals">Approval Controls</a></li>
+                    <li><a href="#promotions">Promotions & Broadcasts</a></li>
+                    <li><a href="#messages">Direct User Messages</a></li>
+                    <li><a href="#support">Support Tickets</a></li>
+                </ul>
+            </div>
+            
+            <!-- SECTION 1: Account Inventory -->
+            <div class="command-section" id="account-inventory">
+                <div class="section-title">📦 Account Inventory Management</div>
+                
+                <div class="command-card">
+                    <div class="topic-label">ACCOUNT_INVENTORY Topic</div>
+                    <div class="command-name">Add Available Account</div>
+                    <div class="command-description">
+                        Add a game account to the available pool so users can load it
+                    </div>
+                    <div class="usage-block">
+                        <div class="usage-label">Format:</div>
+                        ACCOUNT | game=GameA | username=user123 | password=pass456 | status=AVAILABLE
+                    </div>
+                    <div class="example">
+                        <strong>Example:</strong><br/>
+                        <code>ACCOUNT | game=GameB | username=john_doe | password=SecurePass789 | status=AVAILABLE</code>
+                    </div>
+                    <div class="notes">
+                        <strong>Notes:</strong> Bot will create a canonical record that can be edited later. Status must be AVAILABLE for the account to be assignable to users.
+                    </div>
+                </div>
+                
+                <div class="command-card">
+                    <div class="topic-label">ACCOUNT_INVENTORY Topic</div>
+                    <div class="command-name">Mark Account as Assigned</div>
+                    <div class="command-description">
+                        Mark an account as assigned to a specific user (removes from available pool)
+                    </div>
+                    <div class="usage-block">
+                        <div class="usage-label">Format:</div>
+                        ACCOUNT | game=GameA | username=user123 | password=pass456 | status=ASSIGNED | assigned_to=USER_ID | assigned_at=TIMESTAMP
+                    </div>
+                    <div class="example">
+                        <strong>Example:</strong><br/>
+                        <code>ACCOUNT | game=GameA | username=john_doe | password=SecurePass789 | status=ASSIGNED | assigned_to=123456789 | assigned_at=2026-02-01T10:30:00Z</code>
+                    </div>
+                    <div class="notes">
+                        <strong>Notes:</strong> The <code>assigned_to</code> must be a valid user ID. The <code>assigned_at</code> should be ISO format timestamp.
+                    </div>
+                </div>
+            </div>
+            
+            <!-- SECTION 2: Payment Configuration -->
+            <div class="command-section" id="payment-config">
+                <div class="section-title">💳 Payment Configuration</div>
+                
+                <div class="command-card">
+                    <div class="topic-label">PAYMENT_CONFIG Topic</div>
+                    <div class="command-name">Add / Update Payment QR Code</div>
+                    <div class="command-description">
+                        Upload a payment QR code (photo or document) for a specific game and payment method. Can be used for multiple methods.
+                    </div>
+                    <div class="usage-block">
+                        <div class="usage-label">Format:</div>
+                        PAYMENT_QR | game=GameA | method=CashApp
+                    </div>
+                    <div class="example">
+                        <strong>Example:</strong><br/>
+                        Upload a photo/document with caption: <code>PAYMENT_QR | game=GameA | method=CashApp</code><br/>
+                        Or: <code>PAYMENT_QR | game=GameB | method=Zelle</code>
+                    </div>
+                    <div class="notes">
+                        <strong>Notes:</strong> 
+                        <ul style="margin-left: 20px; margin-top: 8px;">
+                            <li>Must attach a photo or document to the message</li>
+                            <li>Each game+method combination can have its own QR</li>
+                            <li>Re-uploading with the same game+method will replace the previous QR</li>
+                            <li>Common methods: CashApp, Zelle, Chime, Venmo, etc.</li>
+                        </ul>
+                    </div>
+                </div>
+                
+                <div class="command-card">
+                    <div class="topic-label">PAYMENT_CONFIG Topic</div>
+                    <div class="command-name">Disable Payment Method</div>
+                    <div class="command-description">
+                        Disable a payment method so it no longer appears to users (but QR data is preserved)
+                    </div>
+                    <div class="usage-block">
+                        <div class="usage-label">Format:</div>
+                        PAYMENT_METHOD_DISABLE | game=GameA | method=CashApp
+                    </div>
+                    <div class="example">
+                        <strong>Example:</strong><br/>
+                        <code>PAYMENT_METHOD_DISABLE | game=GameA | method=CashApp</code>
+                    </div>
+                    <div class="notes">
+                        <strong>Notes:</strong> Users will not see this method when they select payment options. The QR data remains stored and can be re-enabled.
+                    </div>
+                </div>
+                
+                <div class="command-card">
+                    <div class="topic-label">PAYMENT_CONFIG Topic</div>
+                    <div class="command-name">Enable Payment Method</div>
+                    <div class="command-description">
+                        Re-enable a previously disabled payment method
+                    </div>
+                    <div class="usage-block">
+                        <div class="usage-label">Format:</div>
+                        PAYMENT_METHOD_ENABLE | game=GameA | method=CashApp
+                    </div>
+                    <div class="example">
+                        <strong>Example:</strong><br/>
+                        <code>PAYMENT_METHOD_ENABLE | game=GameA | method=CashApp</code>
+                    </div>
+                    <div class="notes">
+                        <strong>Notes:</strong> Once enabled, the method will appear in the user's payment method selection menu.
+                    </div>
+                </div>
+            </div>
+            
+            <!-- SECTION 3: Approvals -->
+            <div class="command-section" id="approvals">
+                <div class="section-title">✅ Approval Controls</div>
+                
+                <div class="command-card">
+                    <div class="topic-label">LOAD_APPROVALS or WITHDRAW_APPROVALS Topic</div>
+                    <div class="command-name">Approve Load / Withdrawal Request</div>
+                    <div class="command-description">
+                        Click the <code>✅ Approve</code> button on a pending request to approve it
+                    </div>
+                    <div class="example">
+                        <strong>How:</strong><br/>
+                        1. Navigate to LOAD_APPROVALS or WITHDRAW_APPROVALS topic<br/>
+                        2. Find the pending request<br/>
+                        3. Click the <code>✅ Approve</code> button<br/>
+                        4. User receives confirmation and balance is updated
+                    </div>
+                    <div class="notes">
+                        <strong>Notes:</strong> Approvals are logged with your admin identity and timestamp.
+                    </div>
+                </div>
+                
+                <div class="command-card">
+                    <div class="topic-label">LOAD_APPROVALS or WITHDRAW_APPROVALS Topic</div>
+                    <div class="command-name">Reject Load / Withdrawal Request</div>
+                    <div class="command-description">
+                        Click the <code>❌ Reject</code> button on a pending request to reject it with a reason
+                    </div>
+                    <div class="example">
+                        <strong>How:</strong><br/>
+                        1. Navigate to LOAD_APPROVALS or WITHDRAW_APPROVALS topic<br/>
+                        2. Find the pending request<br/>
+                        3. Click the <code>❌ Reject</code> button<br/>
+                        4. Submit your rejection reason in the next step
+                    </div>
+                    <div class="notes">
+                        <strong>Notes:</strong> The rejection reason is visible to the user. You can cancel a rejection by clicking <code>↩ Cancel Reject</code>.
+                    </div>
+                </div>
+            </div>
+            
+            <!-- SECTION 4: Promotions -->
+            <div class="command-section" id="promotions">
+                <div class="section-title">📣 Promotions & Broadcasts</div>
+                
+                <div class="command-card">
+                    <div class="topic-label">PROMOTIONS Topic</div>
+                    <div class="command-name">Send Promotion to All Users</div>
+                    <div class="command-description">
+                        Broadcast a promotion message to all known users in the system
+                    </div>
+                    <div class="usage-block">
+                        <div class="usage-label">Method 1 - Inline:</div>
+                        /promo This is your promotion text here
+                    </div>
+                    <div class="usage-block">
+                        <div class="usage-label">Method 2 - Multi-line:</div>
+                        1. Send <code>/promo</code> in PROMOTIONS topic<br/>
+                        2. Send your promotion text as the next message
+                    </div>
+                    <div class="example">
+                        <strong>Example:</strong><br/>
+                        <code>/promo 🎉 NEW BONUS: Load $100 and get 20% extra credit!</code><br/>
+                        Or:<br/>
+                        1. Send: <code>/promo</code><br/>
+                        2. Follow up with: <code>🎉 NEW BONUS: Load $100 and get 20% extra credit!</code>
+                    </div>
+                    <div class="notes">
+                        <strong>Notes:</strong> All known users will receive a DM with the promotion. Delivery attempts are logged with success/failure stats.
+                    </div>
+                </div>
+            </div>
+            
+            <!-- SECTION 5: Direct Messages -->
+            <div class="command-section" id="messages">
+                <div class="section-title">✉️ Direct User Messages</div>
+                
+                <div class="command-card">
+                    <div class="topic-label">PROMOTIONS Topic</div>
+                    <div class="command-name">Send Message to Specific User</div>
+                    <div class="command-description">
+                        Send a direct message to a specific user by their user ID
+                    </div>
+                    <div class="usage-block">
+                        <div class="usage-label">Method 1 - Inline:</div>
+                        /msguser USER_ID Your message text here
+                    </div>
+                    <div class="usage-block">
+                        <div class="usage-label">Method 2 - Step by Step:</div>
+                        1. Send <code>/msguser</code> in PROMOTIONS topic<br/>
+                        2. Send the target User ID as next message<br/>
+                        3. Send the message text as the final message
+                    </div>
+                    <div class="example">
+                        <strong>Example:</strong><br/>
+                        <code>/msguser 123456789 Hi! Your account has been verified. You can now load balance.</code><br/>
+                        Or:<br/>
+                        1. Send: <code>/msguser</code><br/>
+                        2. Send: <code>123456789</code><br/>
+                        3. Send: <code>Hi! Your account has been verified. You can now load balance.</code>
+                    </div>
+                    <div class="notes">
+                        <strong>Notes:</strong> The user ID must be a valid Telegram user ID. Messages are sent via bot DM. Delivery is logged.
+                    </div>
+                </div>
+            </div>
+            
+            <!-- SECTION 6: Support Tickets -->
+            <div class="command-section" id="support">
+                <div class="section-title">🎫 Support Tickets</div>
+                
+                <div class="command-card">
+                    <div class="topic-label">SUPPORT_TICKETS Topic</div>
+                    <div class="command-name">Resolve a Support Ticket</div>
+                    <div class="command-description">
+                        Mark a support ticket as resolved (closes the ticket and stops accepting replies)
+                    </div>
+                    <div class="example">
+                        <strong>How:</strong><br/>
+                        1. Open SUPPORT_TICKETS topic<br/>
+                        2. Find the ticket you want to resolve<br/>
+                        3. Click the <code>✅ Resolve</code> button<br/>
+                        4. Ticket status changes to RESOLVED
+                    </div>
+                    <div class="notes">
+                        <strong>Notes:</strong> Once resolved, users cannot reply to this ticket. Action is logged with admin identity and timestamp.
+                    </div>
+                </div>
+                
+                <div class="command-card">
+                    <div class="topic-label">SUPPORT_TICKETS Topic</div>
+                    <div class="command-name">Close a Support Ticket</div>
+                    <div class="command-description">
+                        Mark a support ticket as closed (stops accepting replies without full resolution)
+                    </div>
+                    <div class="example">
+                        <strong>How:</strong><br/>
+                        1. Open SUPPORT_TICKETS topic<br/>
+                        2. Find the ticket you want to close<br/>
+                        3. Click the <code>❌ Close</code> button<br/>
+                        4. Ticket status changes to CLOSED
+                    </div>
+                    <div class="notes">
+                        <strong>Notes:</strong> Similar to Resolve but used when you want to end conversation without full resolution. Action is logged.
+                    </div>
+                </div>
+                
+                <div class="command-card">
+                    <div class="topic-label">SUPPORT_TICKETS Topic</div>
+                    <div class="command-name">Reply to Support Ticket</div>
+                    <div class="command-description">
+                        Send a reply to the ticket user via bot DM. The user can then reply back via the "<code>↩ Reply</code>" button.
+                    </div>
+                    <div class="example">
+                        <strong>How:</strong><br/>
+                        1. Open SUPPORT_TICKETS topic<br/>
+                        2. Find the ticket<br/>
+                        3. Click the <code>💬 Reply</code> button<br/>
+                        4. Bot will DM you asking for your reply<br/>
+                        5. Send your reply message<br/>
+                        6. Bot posts your reply to the ticket and notifies the user via DM<br/>
+                        7. User can click <code>↩ Reply</code> in their DM to respond back
+                    </div>
+                    <div class="notes">
+                        <strong>Notes:</strong> 
+                        <ul style="margin-left: 20px; margin-top: 8px;">
+                            <li>Replies are captured via private bot DM (not in topic)</li>
+                            <li>Your identity and timestamp are included with each reply</li>
+                            <li>Users are notified via DM when admins reply</li>
+                            <li>Users can continue the conversation via <code>↩ Reply</code> button</li>
+                            <li>All replies are persisted in snapshots</li>
+                        </ul>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Summary Table -->
+            <div class="command-section">
+                <div class="section-title">📊 Quick Reference Table</div>
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Topic</th>
+                            <th>Command</th>
+                            <th>Description</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td>ACCOUNT_INVENTORY</td>
+                            <td><code>ACCOUNT | game=... | username=... | password=... | status=AVAILABLE</code></td>
+                            <td>Add account to available pool</td>
+                        </tr>
+                        <tr>
+                            <td>ACCOUNT_INVENTORY</td>
+                            <td><code>ACCOUNT | ... | status=ASSIGNED | assigned_to=... | assigned_at=...</code></td>
+                            <td>Mark account as assigned</td>
+                        </tr>
+                        <tr>
+                            <td>PAYMENT_CONFIG</td>
+                            <td><code>PAYMENT_QR | game=... | method=...</code> (with photo/document)</td>
+                            <td>Add/update payment QR</td>
+                        </tr>
+                        <tr>
+                            <td>PAYMENT_CONFIG</td>
+                            <td><code>PAYMENT_METHOD_DISABLE | game=... | method=...</code></td>
+                            <td>Disable payment method</td>
+                        </tr>
+                        <tr>
+                            <td>PAYMENT_CONFIG</td>
+                            <td><code>PAYMENT_METHOD_ENABLE | game=... | method=...</code></td>
+                            <td>Enable payment method</td>
+                        </tr>
+                        <tr>
+                            <td>LOAD_APPROVALS</td>
+                            <td>✅ Approve button</td>
+                            <td>Approve load request</td>
+                        </tr>
+                        <tr>
+                            <td>LOAD_APPROVALS</td>
+                            <td>❌ Reject button</td>
+                            <td>Reject load request</td>
+                        </tr>
+                        <tr>
+                            <td>WITHDRAW_APPROVALS</td>
+                            <td>✅ Approve button</td>
+                            <td>Approve withdrawal request</td>
+                        </tr>
+                        <tr>
+                            <td>WITHDRAW_APPROVALS</td>
+                            <td>❌ Reject button</td>
+                            <td>Reject withdrawal request</td>
+                        </tr>
+                        <tr>
+                            <td>PROMOTIONS</td>
+                            <td><code>/promo TEXT</code></td>
+                            <td>Send promotion to all users</td>
+                        </tr>
+                        <tr>
+                            <td>PROMOTIONS</td>
+                            <td><code>/msguser USER_ID TEXT</code></td>
+                            <td>Send message to specific user</td>
+                        </tr>
+                        <tr>
+                            <td>SUPPORT_TICKETS</td>
+                            <td>✅ Resolve button</td>
+                            <td>Resolve support ticket</td>
+                        </tr>
+                        <tr>
+                            <td>SUPPORT_TICKETS</td>
+                            <td>❌ Close button</td>
+                            <td>Close support ticket</td>
+                        </tr>
+                        <tr>
+                            <td>SUPPORT_TICKETS</td>
+                            <td>💬 Reply button</td>
+                            <td>Reply to support ticket</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+        
+        <!-- Footer -->
+        <div class="footer">
+            <p>🤖 Game Account Manager Bot - Admin Commands Reference<br/>
+            Generated: February 1, 2026 | All commands are case-insensitive | Bot must be admin in the group</p>
+        </div>
+    </div>
+</body>
+</html>
