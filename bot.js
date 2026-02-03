@@ -51,9 +51,9 @@ const TOPIC_THREAD_IDS = {
 // GAME SYSTEM (FIXED)
 // =========================
 const DEFAULT_GAMES = [
-  { id: "GameA", name: "Game A", status: "ACTIVE" },
-  { id: "GameB", name: "Game B", status: "ACTIVE" },
-  { id: "GameC", name: "Game C", status: "DISABLED" },
+  { id: "GameA", name: "Game A", status: "ACTIVE", download_link: "https://example.com/download/gameA" },
+  { id: "GameB", name: "Game B", status: "ACTIVE", download_link: "https://example.com/download/gameB" },
+  { id: "GameC", name: "Game C", status: "DISABLED", download_link: "https://example.com/download/gameC" },
 ];
 
 // =========================
@@ -460,7 +460,7 @@ function getActiveGamesForUsers() {
 }
 
 function formatGameLine(g) {
-  return `GAME | id=${g.id} | name=${g.name} | status=${g.status}`;
+  return `GAME | id=${g.id} | name=${g.name} | status=${g.status} | download_link=${g.download_link || ""}`;
 }
 
 function parseKVLine(line, prefix) {
@@ -486,7 +486,7 @@ function parseGameMessage(text) {
   if (!kv.id || !kv.name || !kv.status) return null;
   const status = kv.status;
   if (!["ACTIVE", "DISABLED", "ARCHIVED"].includes(status)) return null;
-  return { id: kv.id, name: kv.name, status };
+  return { id: kv.id, name: kv.name, status, download_link: kv.download_link || "" };
 }
 
 function formatAccountAvailableLine(game, username, password) {
@@ -531,6 +531,30 @@ function buildGamePickerKeyboard() {
   return { inline_keyboard: rows };
 }
 
+function buildGameDownloadsKeyboard() {
+  const games = getActiveGamesForUsers();
+  const rows = [];
+  for (const g of games) {
+    if (g.download_link) {
+      rows.push([{ text: `📥 ${g.name}`, url: g.download_link }]);
+    }
+  }
+  rows.push([{ text: "🔙 Back", callback_data: cb(["U", "MENU", "MAIN"]) }]);
+  return { inline_keyboard: rows };
+}
+
+function renderGameDownloadsText() {
+  const games = getActiveGamesForUsers();
+  const lines = ["📥 <b>Game Downloads</b>", "", "Available games:"];
+  for (const g of games) {
+    if (g.download_link) {
+      lines.push(`🎮 <b>${g.name}</b>`);
+      lines.push(`🔗 <code>${g.download_link}</code>`);
+    }
+  }
+  return lines.join("\n");
+}
+
 function buildMainMenuKeyboard() {
   return {
     inline_keyboard: [
@@ -538,7 +562,8 @@ function buildMainMenuKeyboard() {
       [{ text: "👤 View My Account", callback_data: cb(["U", "MENU", "VIEW"]) }],
       [{ text: "🟦 Load Balance", callback_data: cb(["U", "MENU", "LOAD"]) }],
       [{ text: "🟩 Cashout", callback_data: cb(["U", "MENU", "CASHOUT"]) }],
-      [{ text: "💬 Support", callback_data: cb(["U", "MENU", "SUPPORT"]) }],
+      [{ text: "� Game Downloads", callback_data: cb(["U", "MENU", "DOWNLOADS"]) }],
+      [{ text: "�💬 Support", callback_data: cb(["U", "MENU", "SUPPORT"]) }],
       [{ text: "🎮 Change Game", callback_data: cb(["U", "MENU", "CHANGE_GAME"]) }],
     ],
   };
@@ -2362,6 +2387,17 @@ bot.on("callback_query", async (q) => {
           return;
         }
 
+        if (action === "DOWNLOADS") {
+          await safeEditText(q.message.chat.id, q.message.message_id, renderGameDownloadsText(), buildGameDownloadsKeyboard());
+          return;
+        }
+
+        if (action === "MAIN") {
+          await safeEditText(q.message.chat.id, q.message.message_id, renderMainMenuText(userId), buildMainMenuKeyboard());
+          return;
+        }
+      }
+
 
       if (parts[1] === "TICKET") {
         const action = parts[2];
@@ -2387,11 +2423,6 @@ bot.on("callback_query", async (q) => {
             ticket_id: ticketId,
             started_at: isoNow(),
           });
-          return;
-        }
-      }
-        if (action === "SUPPORT") {
-          await startSupportFlow(userId);
           return;
         }
       }
