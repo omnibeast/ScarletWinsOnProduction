@@ -30,7 +30,7 @@
 // =========================
 const TelegramBot = require("node-telegram-bot-api");
 
-const BOT_TOKEN = process.env.BOT_TOKEN || "8370829137:AAGT2UrtcfpJp136LxNvIFvLjvt4VLW_j2M";
+const BOT_TOKEN = process.env.BOT_TOKEN || "8370829137:AAHQHXqLlh4uLTjNqInbj_iXDQ07n3vQYPQ";
 const ADMIN_GROUP_ID = Number(process.env.ADMIN_GROUP_ID || "-1003733011913");
 
 const TOPIC_THREAD_IDS = {
@@ -74,6 +74,19 @@ const bot = new TelegramBot(BOT_TOKEN, {
     interval: 300,
     params: { timeout: 30 },
   },
+});
+
+// Add error handlers for polling
+bot.on("polling_error", (err) => {
+  console.error(`[POLLING ERROR] ${err.code}: ${err.message}`);
+});
+
+bot.on("polling_start", () => {
+  console.log("[POLLING] Started successfully");
+});
+
+bot.on("error", (err) => {
+  console.error(`[BOT ERROR] ${err.message}`);
 });
 
 // =========================
@@ -1784,6 +1797,14 @@ async function handleMsgUserCommand(msg) {
 // =========================
 bot.on("message", async (msg) => {
   try {
+    // Debug: log all messages
+    console.log(`[MSG RECEIVED] Type: ${msg.chat?.type}, From: ${msg.from?.id}, Text: "${msg.text}", Caption: "${msg.caption}"`);
+    
+    if (!msg.from?.id) {
+      console.log("[MSG] No user ID, skipping");
+      return;
+    }
+
     // Track known users on any private interaction
     if (isPrivate(msg) && msg.from?.id) {
       const uid = msg.from.id;
@@ -1856,12 +1877,21 @@ bot.on("message", async (msg) => {
           return;
         }
       }
-      if (safeText(msg.text).trim() === "/start") {
+      console.log(`[PRIVATE CMD] Text: "${msg.text}", isPrivate: ${isPrivate(msg)}`);
+      if (msg.text && safeText(msg.text).trim() === "/start") {
+        console.log(`[/start MATCHED] User ${msg.from.id}`);
         const uid = msg.from.id;
+        console.log(`[/start] Received from user ${uid}`);
         const game = selectedGameForUser(uid);
-        if (!game) await sendGamePicker(uid, uid);
-        else await sendMainMenu(uid, uid);
-        await writeSnapshot();
+        console.log(`[/start] Selected game: ${game || "none"}`);
+        try {
+          if (!game) await sendGamePicker(uid, uid);
+          else await sendMainMenu(uid, uid);
+          await writeSnapshot();
+          console.log(`[/start] Successfully sent menu to user ${uid}`);
+        } catch (err) {
+          console.error(`[/start] Error for user ${uid}:`, err);
+        }
         return;
       }
 
@@ -2221,12 +2251,14 @@ bot.on("edited_message", async (msg) => {
 // =========================
 bot.on("callback_query", async (q) => {
   try {
+    console.log(`[CALLBACK] From user ${q.from?.id}, Data: "${q.data}"`);
     const data = safeText(q.data);
     const parts = parseCb(data);
     const fromId = q.from?.id;
 
     // USER callbacks (private chat)
     if (parts[0] === "U") {
+      console.log(`[CALLBACK USER] Action: ${parts[1]}, Parts:`, parts);
       if (!q.message || q.message.chat.type !== "private") {
         await answerCb(q.id, "Use this in private chat.");
         return;
@@ -2646,8 +2678,13 @@ async function startup() {
     }
   }, SNAPSHOT_INTERVAL_MS);
 
+  // Log polling state
+  console.log(`[STARTUP] Polling enabled: true`);
+  console.log(`[STARTUP] BOT_TOKEN length: ${BOT_TOKEN.length}`);
+  
   console.log(`✅ Bot started (polling): @${BOT_USERNAME || "unknown"} (${BOT_ID})`);
   console.log(`✅ Admin group: ${ADMIN_GROUP_ID}`);
+  console.log(`[READY] Waiting for messages...`);
 }
 
 startup().catch((e) => {
