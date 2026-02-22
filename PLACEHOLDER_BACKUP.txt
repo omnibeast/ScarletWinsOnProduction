@@ -1,0 +1,48 @@
+=========================
+PLACEHOLDER BACKUP
+=========================
+
+This file serves as a backup for placeholder values used in bot.js
+
+BOT_TOKEN PLACEHOLDER:
+8370829137:AAHQHXqLlh4uLTjNqInbj_iXDQ07n3vQYPQ
+
+ADMIN_GROUP_ID PLACEHOLDER:
+-1003733011913
+
+DEFAULT GAMES PLACEHOLDERS:
+- GameA: https://example.com/download/gameA
+- GameB: https://example.com/download/gameB
+- GameC: https://example.com/download/gameC
+
+TOPIC THREAD IDS:
+- ACCOUNT_INVENTORY: 4
+- LOAD_APPROVALS: 6
+- WITHDRAW_APPROVALS: 8
+- TRANSACTION_LOGS: 10
+- EMAIL_LOGS: 12
+- PROMOTIONS: 2
+- MANAGE_GAMES: 20
+- PAYMENT_CONFIG: 57
+- ADMIN_USER_MSGS: 59
+- SUPPORT_TICKETS: 186
+- SYSTEM_BACKUPS: 92
+
+=========================
+
+const BOT_TOKEN = process.env.BOT_TOKEN || "8370829137:AAHQHXqLlh4uLTjNqInbj_iXDQ07n3vQYPQ";
+const ADMIN_GROUP_ID = Number(process.env.ADMIN_GROUP_ID || "-1003733011913");
+
+const TOPIC_THREAD_IDS = {
+  ACCOUNT_INVENTORY: 4,
+  LOAD_APPROVALS: 6,
+  WITHDRAW_APPROVALS: 8,
+  TRANSACTION_LOGS: 10,
+  EMAIL_LOGS: 12,
+  PROMOTIONS: 2,
+  MANAGE_GAMES: 20,
+  PAYMENT_CONFIG: 57,
+  ADMIN_USER_MSGS: 59,
+  SUPPORT_TICKETS: 186,
+  SYSTEM_BACKUPS: 92,
+};

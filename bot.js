@@ -30,7 +30,7 @@
 // =========================
 const TelegramBot = require("node-telegram-bot-api");
 
-const BOT_TOKEN = process.env.BOT_TOKEN || "8370829137:AAGT2UrtcfpJp136LxNvIFvLjvt4VLW_j2M";
+const BOT_TOKEN = process.env.BOT_TOKEN || "8370829137:AAHQHXqLlh4uLTjNqInbj_iXDQ07n3vQYPQ";
 const ADMIN_GROUP_ID = Number(process.env.ADMIN_GROUP_ID || "-1003733011913");
 
 const TOPIC_THREAD_IDS = {
@@ -51,9 +51,9 @@ const TOPIC_THREAD_IDS = {
 // GAME SYSTEM (FIXED)
 // =========================
 const DEFAULT_GAMES = [
-  { id: "GameA", name: "Game A", status: "ACTIVE" },
-  { id: "GameB", name: "Game B", status: "ACTIVE" },
-  { id: "GameC", name: "Game C", status: "DISABLED" },
+  { id: "GameA", name: "Game A", status: "ACTIVE", download_link: "https://example.com/download/gameA" },
+  { id: "GameB", name: "Game B", status: "ACTIVE", download_link: "https://example.com/download/gameB" },
+  { id: "GameC", name: "Game C", status: "DISABLED", download_link: "https://example.com/download/gameC" },
 ];
 
 // =========================
@@ -74,6 +74,19 @@ const bot = new TelegramBot(BOT_TOKEN, {
     interval: 300,
     params: { timeout: 30 },
   },
+});
+
+// Add error handlers for polling
+bot.on("polling_error", (err) => {
+  console.error(`[POLLING ERROR] ${err.code}: ${err.message}`);
+});
+
+bot.on("polling_start", () => {
+  console.log("[POLLING] Started successfully");
+});
+
+bot.on("error", (err) => {
+  console.error(`[BOT ERROR] ${err.message}`);
 });
 
 // =========================
@@ -459,8 +472,7 @@ function getActiveGamesForUsers() {
 }
 
 function formatGameLine(g) {
-  const suffix = g.download_url ? ` | download_url=${g.download_url}` : "";
-  return `GAME | id=${g.id} | name=${g.name} | status=${g.status}${suffix}`;
+  return `GAME | id=${g.id} | name=${g.name} | status=${g.status}`;
 }
 
 function parseKVLine(line, prefix) {
@@ -486,10 +498,7 @@ function parseGameMessage(text) {
   if (!kv.id || !kv.name || !kv.status) return null;
   const status = kv.status;
   if (!["ACTIVE", "DISABLED", "ARCHIVED"].includes(status)) return null;
-  const rawDownload = kv.download_url || kv.download_link || kv.link || "";
-  const download_url = rawDownload ? normalizeHttpUrl(rawDownload) : null;
-  if (rawDownload && !download_url) return null;
-  return { id: kv.id, name: kv.name, status, download_url };
+  return { id: kv.id, name: kv.name, status };
 }
 
 function formatAccountAvailableLine(game, username, password) {
@@ -534,6 +543,30 @@ function buildGamePickerKeyboard() {
   return { inline_keyboard: rows };
 }
 
+function buildGameDownloadsKeyboard() {
+  const games = getActiveGamesForUsers();
+  const rows = [];
+  for (const g of games) {
+    if (g.download_link) {
+      rows.push([{ text: `📥 ${g.name}`, url: g.download_link }]);
+    }
+  }
+  rows.push([{ text: "🔙 Back", callback_data: cb(["U", "MENU", "MAIN"]) }]);
+  return { inline_keyboard: rows };
+}
+
+function renderGameDownloadsText() {
+  const games = getActiveGamesForUsers();
+  const lines = ["📥 <b>Game Downloads</b>", "", "Available games:"];
+  for (const g of games) {
+    if (g.download_link) {
+      lines.push(`🎮 <b>${g.name}</b>`);
+      lines.push(`🔗 <code>${g.download_link}</code>`);
+    }
+  }
+  return lines.join("\n");
+}
+
 function buildMainMenuKeyboard(userId) {
   const selected = selectedGameForUser(userId);
   const selectedGame = selected ? gamesById.get(selected) : null;
@@ -546,7 +579,8 @@ function buildMainMenuKeyboard(userId) {
       ...(downloadUrl ? [[{ text: "🌐 Open Current Download Link", url: downloadUrl }]] : []),
       [{ text: "🟦 Load Balance", callback_data: cb(["U", "MENU", "LOAD"]) }],
       [{ text: "🟩 Cashout", callback_data: cb(["U", "MENU", "CASHOUT"]) }],
-      [{ text: "💬 Support", callback_data: cb(["U", "MENU", "SUPPORT"]) }],
+      [{ text: "� Game Downloads", callback_data: cb(["U", "MENU", "DOWNLOADS"]) }],
+      [{ text: "�💬 Support", callback_data: cb(["U", "MENU", "SUPPORT"]) }],
       [{ text: "🎮 Change Game", callback_data: cb(["U", "MENU", "CHANGE_GAME"]) }],
     ],
   };
@@ -1810,6 +1844,14 @@ async function handleMsgUserCommand(msg) {
 // =========================
 bot.on("message", async (msg) => {
   try {
+    // Debug: log all messages
+    console.log(`[MSG RECEIVED] Type: ${msg.chat?.type}, From: ${msg.from?.id}, Text: "${msg.text}", Caption: "${msg.caption}"`);
+    
+    if (!msg.from?.id) {
+      console.log("[MSG] No user ID, skipping");
+      return;
+    }
+
     // Track known users on any private interaction
     if (isPrivate(msg) && msg.from?.id) {
       const uid = msg.from.id;
@@ -1882,12 +1924,21 @@ bot.on("message", async (msg) => {
           return;
         }
       }
-      if (safeText(msg.text).trim() === "/start") {
+      console.log(`[PRIVATE CMD] Text: "${msg.text}", isPrivate: ${isPrivate(msg)}`);
+      if (msg.text && safeText(msg.text).trim() === "/start") {
+        console.log(`[/start MATCHED] User ${msg.from.id}`);
         const uid = msg.from.id;
+        console.log(`[/start] Received from user ${uid}`);
         const game = selectedGameForUser(uid);
-        if (!game) await sendGamePicker(uid, uid);
-        else await sendMainMenu(uid, uid);
-        await writeSnapshot();
+        console.log(`[/start] Selected game: ${game || "none"}`);
+        try {
+          if (!game) await sendGamePicker(uid, uid);
+          else await sendMainMenu(uid, uid);
+          await writeSnapshot();
+          console.log(`[/start] Successfully sent menu to user ${uid}`);
+        } catch (err) {
+          console.error(`[/start] Error for user ${uid}:`, err);
+        }
         return;
       }
 
@@ -2247,12 +2298,14 @@ bot.on("edited_message", async (msg) => {
 // =========================
 bot.on("callback_query", async (q) => {
   try {
+    console.log(`[CALLBACK] From user ${q.from?.id}, Data: "${q.data}"`);
     const data = safeText(q.data);
     const parts = parseCb(data);
     const fromId = q.from?.id;
 
     // USER callbacks (private chat)
     if (parts[0] === "U") {
+      console.log(`[CALLBACK USER] Action: ${parts[1]}, Parts:`, parts);
       if (!q.message || q.message.chat.type !== "private") {
         await answerCb(q.id, "Use this in private chat.");
         return;
@@ -2395,6 +2448,17 @@ bot.on("callback_query", async (q) => {
           return;
         }
 
+        if (action === "DOWNLOADS") {
+          await safeEditText(q.message.chat.id, q.message.message_id, renderGameDownloadsText(), buildGameDownloadsKeyboard());
+          return;
+        }
+
+        if (action === "MAIN") {
+          await safeEditText(q.message.chat.id, q.message.message_id, renderMainMenuText(userId), buildMainMenuKeyboard());
+          return;
+        }
+      }
+
 
       if (parts[1] === "TICKET") {
         const action = parts[2];
@@ -2420,11 +2484,6 @@ bot.on("callback_query", async (q) => {
             ticket_id: ticketId,
             started_at: isoNow(),
           });
-          return;
-        }
-      }
-        if (action === "SUPPORT") {
-          await startSupportFlow(userId);
           return;
         }
       }
@@ -2712,8 +2771,13 @@ async function startup() {
     }
   }, SNAPSHOT_INTERVAL_MS);
 
+  // Log polling state
+  console.log(`[STARTUP] Polling enabled: true`);
+  console.log(`[STARTUP] BOT_TOKEN length: ${BOT_TOKEN.length}`);
+  
   console.log(`✅ Bot started (polling): @${BOT_USERNAME || "unknown"} (${BOT_ID})`);
   console.log(`✅ Admin group: ${ADMIN_GROUP_ID}`);
+  console.log(`[READY] Waiting for messages...`);
 }
 
 startup().catch((e) => {
