@@ -46,6 +46,7 @@ I've created your Admin Standard Operating Procedures in **3 formats**:
 ### Section 4: User Workflows
 - User registration flow
 - Main menu options
+- Download Game option (link shown per selected game)
 - Load balance & cashout flows (single-message design)
 
 ### Section 5: Admin Commands (MOST IMPORTANT)
@@ -128,7 +129,7 @@ Result: Direct message sent to user
 ### Command 3: Create Game
 ```
 Location: MANAGE_GAMES topic
-Format: GAME | id=GameX | name=Game Name | status=ACTIVE
+Format: GAME | id=GameX | name=Game Name | status=ACTIVE | download_url=https://example.com/app.apk
 Result: New game available to users
 ```
 
@@ -137,6 +138,22 @@ Result: New game available to users
 Location: ACCOUNT_INVENTORY topic
 Format: ACCOUNT | game=GameX | username=user | password=pass | status=AVAILABLE
 Result: Account ready for FIFO assignment
+```
+
+### Command 5: Set/Update Game Download Link
+```
+Location: MANAGE_GAMES topic
+Format: GAME | id=GameX | name=Game Name | status=ACTIVE | download_url=https://example.com/app.apk
+Result: Users can access the link from 📥 Download Game and see it at top of main menu for selected game
+```
+
+### User Menu Behavior (Download Feature)
+```
+1. User selects a game
+2. Main menu shows selected game + current download link at the top
+3. User taps 📥 Download Game
+4. Bot shows the game's download link and an open-link button
+5. If download_url is not set, bot shows "Download link is not set yet"
 ```
 
 ---
@@ -177,6 +194,10 @@ Result: Account ready for FIFO assignment
 
 ### Q: What if I run out of accounts?
 **A:** Go to ACCOUNT_INVENTORY topic and add more with the ACCOUNT format.
+
+### Q: How do I add game download link for users?
+**A:** In MANAGE_GAMES topic, post/update the GAME line with `download_url=https://...`.
+Users can then open it from the 📥 Download Game menu for their selected game.
 
 ### Q: Can users see the admin topics?
 **A:** NO. Only admins in the supergroup can see these topics. Users only see their private chat with the bot.

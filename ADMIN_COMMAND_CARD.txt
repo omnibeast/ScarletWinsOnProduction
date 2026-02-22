@@ -71,18 +71,19 @@ OUTPUT:
 🎮 ACTION:    Click Enable/Disable/Archive buttons
 
 FORMAT:
-  GAME | id=GAMEID | name=Game Name | status=STATUS
+  GAME | id=GAMEID | name=Game Name | status=STATUS | download_url=https://example.com/game.apk
 
 FIELDS:
   • id:     Unique game ID (no spaces, e.g., "GameA", "Game_Premium")
   • name:   Display name for users (e.g., "Game A", "Premium Edition")
   • status: One of → ACTIVE | DISABLED | ARCHIVED
+  • download_url: Optional HTTP/HTTPS link shown to users in menu + Download Game option
 
 EXAMPLES:
 
-  ✓ GAME | id=GameA | name=Game A | status=ACTIVE
+  ✓ GAME | id=GameA | name=Game A | status=ACTIVE | download_url=https://example.com/gamea.apk
   
-  ✓ GAME | id=GamePremium | name=Premium Edition | status=ACTIVE
+  ✓ GAME | id=GamePremium | name=Premium Edition | status=ACTIVE | download_url=https://example.com/premium
   
   ✓ GAME | id=GameOld | name=Game Old | status=ARCHIVED
 
@@ -90,6 +91,11 @@ LIFECYCLE:
   ACTIVE   → Users can see & register
   DISABLED → Hidden from users, no new registrations
   ARCHIVED → Permanently hidden but kept for records
+
+DOWNLOAD LINK NOTES:
+  • Link is optional, but recommended for ACTIVE games
+  • Must start with http:// or https://
+  • Update by reposting GAME line with same id and new download_url
 
 
 ┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
@@ -137,17 +143,17 @@ STATUS LIFECYCLE:
 ⚡ REQUIREMENT: Must be set BEFORE making game ACTIVE
 
 FORMAT (Caption/Text):
-  PAYMENT_QR | game=GAMEID
+  PAYMENT_QR | game=GAMEID | method=MethodName | tag=Optional text
 
 STEPS:
   1. Go to PAYMENT_CONFIG topic
   2. Upload photo (QR code image) OR document (PDF with QR)
-  3. Add caption: PAYMENT_QR | game=GameA
-  4. Bot stores and displays to users during Load flow
+  3. Add caption, e.g.: PAYMENT_QR | game=GameA | method=CashApp | tag=Pay to Scarlet (tag is optional)
+  4. Bot stores and displays to users during Load flow (tag shown under QR)
 
-EXAMPLE CAPTION:
-  PAYMENT_QR | game=GameA
-  PAYMENT_QR | game=GamePremium
+  EXAMPLE CAPTION:
+  PAYMENT_QR | game=GameA | method=CashApp
+  PAYMENT_QR | game=GameB | method=Zelle | tag=Send $ to Zelle ID
 
 SUPPORTED FILE TYPES:
   📷 Photo:    PNG, JPG, JPEG (displayed inline)
@@ -271,7 +277,7 @@ STEP 3 ALT: ADMIN REJECTS ❌
 │                                                                            │
 │ 🎮 MANAGE_GAMES (ID: 20)                                                  │
 │    → Create/modify games, click Enable/Disable/Archive buttons           │
-│    → Format: GAME | id=X | name=Y | status=Z                             │
+│    → Format: GAME | id=X | name=Y | status=Z | download_url=https://...  │
 │                                                                            │
 │ 📦 ACCOUNT_INVENTORY (ID: 4)                                              │
 │    → Add accounts by posting formatted messages                           │
@@ -290,7 +296,7 @@ STEP 3 ALT: ADMIN REJECTS ❌
 │                                                                            │
 │ 💳 PAYMENT_CONFIG (ID: 57)                                                │
 │    → Upload payment QR images/documents                                   │
-│    → Caption: PAYMENT_QR | game=X                                         │
+│    → Caption: PAYMENT_QR | game=X | method=MethodName | tag=Optional      │
 │                                                                            │
 │ 📣 PROMOTIONS (ID: 2)                                                     │
 │    → Use /promo command to broadcast to all users                         │

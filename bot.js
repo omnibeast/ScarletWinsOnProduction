@@ -94,7 +94,7 @@ let BOT_USERNAME = null;
 // Canonical records are always bot-sent messages in their topics (so we can edit them).
 // Admins can "add/update" by posting formatted messages; bot ingests and updates canonical bot messages.
 
-/** @type {Map<string, {id:string,name:string,status:"ACTIVE"|"DISABLED"|"ARCHIVED", message_id:number}>} */
+/** @type {Map<string, {id:string,name:string,status:"ACTIVE"|"DISABLED"|"ARCHIVED", download_url?:string|null, message_id:number}>} */
 const gamesById = new Map();
 
 /**
@@ -258,6 +258,18 @@ function validateEmail(email) {
   const e = safeText(email).trim();
   // Reasonably strict without being hostile.
   return /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/i.test(e);
+}
+
+function normalizeHttpUrl(input) {
+  const s = safeText(input).trim();
+  if (!s) return null;
+  try {
+    const u = new URL(s);
+    if (u.protocol !== "http:" && u.protocol !== "https:") return null;
+    return u.toString();
+  } catch {
+    return null;
+  }
 }
 
 function makeUserGameKey(userId, gameId) {
@@ -447,7 +459,8 @@ function getActiveGamesForUsers() {
 }
 
 function formatGameLine(g) {
-  return `GAME | id=${g.id} | name=${g.name} | status=${g.status}`;
+  const suffix = g.download_url ? ` | download_url=${g.download_url}` : "";
+  return `GAME | id=${g.id} | name=${g.name} | status=${g.status}${suffix}`;
 }
 
 function parseKVLine(line, prefix) {
@@ -473,7 +486,10 @@ function parseGameMessage(text) {
   if (!kv.id || !kv.name || !kv.status) return null;
   const status = kv.status;
   if (!["ACTIVE", "DISABLED", "ARCHIVED"].includes(status)) return null;
-  return { id: kv.id, name: kv.name, status };
+  const rawDownload = kv.download_url || kv.download_link || kv.link || "";
+  const download_url = rawDownload ? normalizeHttpUrl(rawDownload) : null;
+  if (rawDownload && !download_url) return null;
+  return { id: kv.id, name: kv.name, status, download_url };
 }
 
 function formatAccountAvailableLine(game, username, password) {
@@ -518,11 +534,16 @@ function buildGamePickerKeyboard() {
   return { inline_keyboard: rows };
 }
 
-function buildMainMenuKeyboard() {
+function buildMainMenuKeyboard(userId) {
+  const selected = selectedGameForUser(userId);
+  const selectedGame = selected ? gamesById.get(selected) : null;
+  const downloadUrl = selectedGame?.download_url ? normalizeHttpUrl(selectedGame.download_url) : null;
   return {
     inline_keyboard: [
       [{ text: "🧾 Register Account", callback_data: cb(["U", "MENU", "REGISTER"]) }],
       [{ text: "👤 View My Account", callback_data: cb(["U", "MENU", "VIEW"]) }],
+      [{ text: "📥 Download Game", callback_data: cb(["U", "MENU", "DOWNLOAD"]) }],
+      ...(downloadUrl ? [[{ text: "🌐 Open Current Download Link", url: downloadUrl }]] : []),
       [{ text: "🟦 Load Balance", callback_data: cb(["U", "MENU", "LOAD"]) }],
       [{ text: "🟩 Cashout", callback_data: cb(["U", "MENU", "CASHOUT"]) }],
       [{ text: "💬 Support", callback_data: cb(["U", "MENU", "SUPPORT"]) }],
@@ -881,10 +902,14 @@ function renderGamePickerText(userId) {
 
 function renderMainMenuText(userId) {
   const game = selectedGameForUser(userId);
+  const selectedGame = game ? gamesById.get(game) : null;
+  const downloadUrl = selectedGame?.download_url ? normalizeHttpUrl(selectedGame.download_url) : null;
+  const linkLine = downloadUrl ? `📥 Download: <code>${downloadUrl}</code>` : "📥 Download: <i>Not set</i>";
   return [
     "🏠 <b>Main Menu</b>",
     "",
     `🎮 Game: <b>${game || "None"}</b>`,
+    linkLine,
     "",
     "Choose an option:",
   ].join("\n");
@@ -938,7 +963,7 @@ async function sendMainMenu(chatId, userId) {
   await withRetry(() =>
     bot.sendMessage(chatId, renderMainMenuText(userId), {
       parse_mode: "HTML",
-      reply_markup: buildMainMenuKeyboard(),
+      reply_markup: buildMainMenuKeyboard(userId),
     }),
   );
 }
@@ -1157,7 +1182,7 @@ async function startLoadFlow(userId) {
           "⚠️ <b>No payment methods available</b>",
           "Please contact an admin.",
         ].join("\n"),
-        { parse_mode: "HTML", reply_markup: buildMainMenuKeyboard() },
+        { parse_mode: "HTML", reply_markup: buildMainMenuKeyboard(userId) },
       ),
     );
     return msg;
@@ -1320,8 +1345,8 @@ async function cancelUserFlow(userId, reason) {
     "",
     reason ? `Reason: <i>${reason}</i>` : "",
   ].filter(Boolean).join("\n");
-  if (flow.kind === "LOAD") await safeEditCaption(flow.chat_id, flow.message_id, text, buildMainMenuKeyboard());
-  else await safeEditText(flow.chat_id, flow.message_id, text, buildMainMenuKeyboard());
+  if (flow.kind === "LOAD") await safeEditCaption(flow.chat_id, flow.message_id, text, buildMainMenuKeyboard(userId));
+  else await safeEditText(flow.chat_id, flow.message_id, text, buildMainMenuKeyboard(userId));
   userFlows.delete(userId);
 }
 
@@ -1329,8 +1354,8 @@ async function finishUserFlowToMenu(userId, kind) {
   const flow = userFlows.get(userId);
   if (!flow) return;
   const text = renderMainMenuText(userId);
-  if (kind === "LOAD") await safeEditCaption(flow.chat_id, flow.message_id, text, buildMainMenuKeyboard());
-  else await safeEditText(flow.chat_id, flow.message_id, text, buildMainMenuKeyboard());
+  if (kind === "LOAD") await safeEditCaption(flow.chat_id, flow.message_id, text, buildMainMenuKeyboard(userId));
+  else await safeEditText(flow.chat_id, flow.message_id, text, buildMainMenuKeyboard(userId));
   userFlows.delete(userId);
 }
 
@@ -1579,17 +1604,17 @@ async function syncDefaultGamesIfFirstBoot(hadState) {
 // =========================
 // PAYMENT CONFIG (PAYMENT_QR records)
 // =========================
-async function upsertPaymentQr(gameId, method, media) {
+async function upsertPaymentQr(gameId, method, media, tag) {
   const key = `${gameId}::${method}`;
   const existing = paymentQRs.get(key);
-  const caption = `PAYMENT_QR | game=${gameId} | method=${method}`;
+  const caption = `PAYMENT_QR | game=${gameId} | method=${method}` + (tag ? ` | tag=${tag}` : "");
 
   if (!existing) {
     const sent =
       media.type === "photo"
         ? await sendToTopicPhoto(TOPIC_THREAD_IDS.PAYMENT_CONFIG, media.file_id, caption)
         : await sendToTopicDocument(TOPIC_THREAD_IDS.PAYMENT_CONFIG, media.file_id, caption);
-    paymentQRs.set(key, { game: gameId, method, type: media.type, file_id: media.file_id, message_id: sent.message_id });
+    paymentQRs.set(key, { game: gameId, method, type: media.type, file_id: media.file_id, message_id: sent.message_id, tag: tag || null });
     await sendToTopicText(
       TOPIC_THREAD_IDS.TRANSACTION_LOGS,
       ["💳 <b>PAYMENT QR SET</b>", `Game: <b>${gameId}</b>`, `Method: <b>${method}</b>`, `Msg ID: <code>${sent.message_id}</code>`, `Timestamp: <code>${isoNow()}</code>`].join("\n"),
@@ -1605,7 +1630,7 @@ async function upsertPaymentQr(gameId, method, media) {
       : { type: "document", media: media.file_id, caption, parse_mode: "HTML" };
 
   await safeEditMedia(ADMIN_GROUP_ID, existing.message_id, inputMedia, undefined);
-  paymentQRs.set(key, { game: gameId, method, type: media.type, file_id: media.file_id, message_id: existing.message_id });
+  paymentQRs.set(key, { game: gameId, method, type: media.type, file_id: media.file_id, message_id: existing.message_id, tag: tag || null });
   await sendToTopicText(
     TOPIC_THREAD_IDS.TRANSACTION_LOGS,
     ["💳 <b>PAYMENT QR UPDATED</b>", `Game: <b>${gameId}</b>`, `Method: <b>${method}</b>`, `Msg ID: <code>${existing.message_id}</code>`, `Timestamp: <code>${isoNow()}</code>`].join("\n"),
@@ -1670,15 +1695,16 @@ async function handlePaymentConfigTopicMessage(msg) {
   if (!kv || !kv.game) return;
   const gameId = kv.game;
   const method = kv.method || "DEFAULT";
+  const tag = kv.tag || null;
 
   const photoFileId = pickBestPhotoFileId(msg.photo);
   if (photoFileId) {
-    await upsertPaymentQr(gameId, method, { type: "photo", file_id: photoFileId });
+    await upsertPaymentQr(gameId, method, { type: "photo", file_id: photoFileId }, tag);
     return;
   }
 
   if (msg.document?.file_id) {
-    await upsertPaymentQr(gameId, method, { type: "document", file_id: msg.document.file_id });
+    await upsertPaymentQr(gameId, method, { type: "document", file_id: msg.document.file_id }, tag);
   }
 }
 
@@ -2249,13 +2275,18 @@ bot.on("callback_query", async (q) => {
         setSelectedGameForUser(userId, gameId);
         await writeSnapshot();
         await answerCb(q.id, `Selected ${g.name}`);
-        await safeEditText(q.message.chat.id, q.message.message_id, renderMainMenuText(userId), buildMainMenuKeyboard());
+        await safeEditText(q.message.chat.id, q.message.message_id, renderMainMenuText(userId), buildMainMenuKeyboard(userId));
         return;
       }
 
       if (parts[1] === "MENU") {
         const action = parts[2];
         await answerCb(q.id, "OK");
+
+        if (action === "BACK") {
+          await safeEditText(q.message.chat.id, q.message.message_id, renderMainMenuText(userId), buildMainMenuKeyboard(userId));
+          return;
+        }
 
         if (action === "CHANGE_GAME") {
           await safeEditText(q.message.chat.id, q.message.message_id, renderGamePickerText(userId), buildGamePickerKeyboard());
@@ -2268,8 +2299,42 @@ bot.on("callback_query", async (q) => {
           return;
         }
 
+        if (action === "DOWNLOAD") {
+          const g = gamesById.get(game);
+          const downloadUrl = g?.download_url ? normalizeHttpUrl(g.download_url) : null;
+          if (!downloadUrl) {
+            await safeEditText(
+              q.message.chat.id,
+              q.message.message_id,
+              [
+                "📥 <b>Download Game</b>",
+                "",
+                `🎮 Game: <b>${game}</b>`,
+                "",
+                "⚠️ Download link is not set yet.",
+                "Please contact admin.",
+              ].join("\n"),
+              buildMainMenuKeyboard(userId),
+            );
+            return;
+          }
+
+          await safeEditText(
+            q.message.chat.id,
+            q.message.message_id,
+            ["📥 <b>Download Game</b>", "", `🎮 Game: <b>${game}</b>`, `🔗 Link: <code>${downloadUrl}</code>`].join("\n"),
+            {
+              inline_keyboard: [
+                [{ text: "🌐 Open Download Link", url: downloadUrl }],
+                [{ text: "🏠 Back to Menu", callback_data: cb(["U", "MENU", "BACK"]) }],
+              ],
+            },
+          );
+          return;
+        }
+
         if (action === "VIEW") {
-          await safeEditText(q.message.chat.id, q.message.message_id, renderViewAccountText(userId), buildMainMenuKeyboard());
+          await safeEditText(q.message.chat.id, q.message.message_id, renderViewAccountText(userId), buildMainMenuKeyboard(userId));
           return;
         }
 
@@ -2284,7 +2349,7 @@ bot.on("callback_query", async (q) => {
               q.message.chat.id,
               q.message.message_id,
               ["🧾 <b>Register Account</b>", "", `🎮 Game: <b>${game}</b>`, "", "Status: <b>NO ACCOUNTS AVAILABLE</b>", "Please try again later."].join("\n"),
-              buildMainMenuKeyboard(),
+              buildMainMenuKeyboard(userId),
             );
             return;
           }
@@ -2293,7 +2358,7 @@ bot.on("callback_query", async (q) => {
               q.message.chat.id,
               q.message.message_id,
               ["🧾 <b>Register Account</b>", "", "⚠️ Failed to assign (inventory edit failed). Please contact admin."].join("\n"),
-              buildMainMenuKeyboard(),
+              buildMainMenuKeyboard(userId),
             );
             return;
           }
@@ -2310,7 +2375,7 @@ bot.on("callback_query", async (q) => {
               `Password: <code>${res.account.password}</code>`,
               `Assigned At: <code>${res.account.assigned_at}</code>`,
             ].join("\n"),
-            buildMainMenuKeyboard(),
+            buildMainMenuKeyboard(userId),
           );
           return;
         }
@@ -2383,8 +2448,9 @@ bot.on("callback_query", async (q) => {
         flow.step = "WAIT_USERNAME";
         userFlows.set(userId, flow);
 
-        // Send QR media with username prompt
-        const caption = renderLoadCaption(flow);
+        // Send QR media with username prompt (include admin-set tag if present)
+        let caption = renderLoadCaption(flow);
+        if (qr.tag) caption = caption + "\n\n" + `🏷 <b>Tag:</b> <code>${safeText(qr.tag)}</code>`;
         const inputMedia =
           qr.type === "photo"
             ? { type: "photo", media: qr.file_id, caption, parse_mode: "HTML" }
@@ -2472,7 +2538,7 @@ bot.on("callback_query", async (q) => {
           await answerCbAlert(q.id, "Game not found.");
           return;
         }
-        const updated = { id: g.id, name: g.name, status: newStatus };
+        const updated = { id: g.id, name: g.name, status: newStatus, download_url: g.download_url || null };
         await upsertCanonicalGameFromParsed(updated, adminIdentity(q.from));
         await answerCb(q.id, `Set ${gameId} → ${newStatus}`);
         return;

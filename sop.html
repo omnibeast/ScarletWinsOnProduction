@@ -384,7 +384,7 @@
                     <div class="topic-name">🎮 MANAGE_GAMES (Topic ID: 20)</div>
                     <div class="topic-id">Purpose: Game configuration and status</div>
                     <p style="margin-top: 8px;">Contains bot-sent messages with format:</p>
-                    <code style="background: #e0e7ff; padding: 4px 8px; border-radius: 3px;">GAME | id=GameA | name=Game A | status=ACTIVE</code>
+                    <code style="background: #e0e7ff; padding: 4px 8px; border-radius: 3px;">GAME | id=GameA | name=Game A | status=ACTIVE | download_url=https://example.com/gamea.apk</code>
                 </div>
                 
                 <div class="topic-item">
@@ -456,6 +456,7 @@
             </ol>
             
             <h3>Main Menu Options</h3>
+            <p>The selected game's download link is shown at the top of main menu (or <em>Not set</em> if missing).</p>
             <table>
                 <thead>
                     <tr>
@@ -474,6 +475,11 @@
                         <td>👤 View My Account</td>
                         <td>Display assigned username & password</td>
                         <td>Account must be assigned to user</td>
+                    </tr>
+                    <tr>
+                        <td>📥 Download Game</td>
+                        <td>Shows selected game's download link and open-link button</td>
+                        <td>Selected game should have <code>download_url</code> configured</td>
                     </tr>
                     <tr>
                         <td>🟦 Load Balance</td>
@@ -668,7 +674,7 @@
             </div>
             <div class="step">
                 <span class="step-number">2</span> Post a message with format:<br/>
-                <code style="background: #e0e7ff; padding: 4px 8px; border-radius: 3px; display: inline-block; margin-top: 5px;">GAME | id=GameD | name=Game D | status=ACTIVE</code>
+                <code style="background: #e0e7ff; padding: 4px 8px; border-radius: 3px; display: inline-block; margin-top: 5px;">GAME | id=GameD | name=Game D | status=ACTIVE | download_url=https://example.com/gamed.apk</code>
             </div>
             <div class="step">
                 <span class="step-number">3</span> Bot ingests it and creates canonical bot-sent record
@@ -717,12 +723,13 @@
             <h3 style="margin-top: 25px;">Game Format Reference</h3>
             <p>When creating/updating games, use this exact format:</p>
             <div style="background: #1e293b; color: #e2e8f0; padding: 15px; border-radius: 4px; font-family: 'Courier New', monospace; margin: 15px 0;">
-GAME | id=GAMEID | name=Game Name | status=STATUS
+GAME | id=GAMEID | name=Game Name | status=STATUS | download_url=https://example.com/app.apk
             </div>
             <ul>
                 <li><code>id</code>: Unique identifier (no spaces, alphanumeric + underscore)</li>
                 <li><code>name</code>: Display name for users</li>
                 <li><code>status</code>: One of ACTIVE, DISABLED, ARCHIVED</li>
+                <li><code>download_url</code>: Optional HTTP/HTTPS download link shown in main menu and Download Game option</li>
             </ul>
         </div>
 
@@ -859,9 +866,9 @@ ACCOUNT | game=GAMEID | username=USERNAME | password=PASSWORD | status=STATUS
             <div class="step">
                 <span class="step-number">1</span> Navigate to <strong>PAYMENT_CONFIG</strong> topic
             </div>
-            <div class="step">
-                <span class="step-number">2</span> Upload photo or document with caption:<br/>
-                <code style="background: #e0e7ff; padding: 4px 8px; border-radius: 3px; display: inline-block; margin-top: 5px;">PAYMENT_QR | game=GameA | method=CashApp</code>
+                <div class="step">
+                <span class="step-number">2</span> Upload photo or document with caption (include method; optional tag):<br/>
+                <code style="background: #e0e7ff; padding: 4px 8px; border-radius: 3px; display: inline-block; margin-top: 5px;">PAYMENT_QR | game=GameA | method=CashApp | tag=Optional text</code>
             </div>
             <div class="step">
                 <span class="step-number">3</span> Bot stores this as canonical payment QR for <code>GameA::CashApp</code>
@@ -874,7 +881,7 @@ ACCOUNT | game=GAMEID | username=USERNAME | password=PASSWORD | status=STATUS
             <p>To change a game's payment QR for a specific method:</p>
             <ol>
                 <li>Go to <strong>PAYMENT_CONFIG</strong> topic</li>
-                <li>Upload the new QR image/document with caption <code>PAYMENT_QR | game=GameA | method=CashApp</code></li>
+                <li>Upload the new QR image/document with caption <code>PAYMENT_QR | game=GameA | method=CashApp | tag=Optional</code></li>
                 <li>Bot edits the existing canonical QR message for that game+method instead of creating duplicates</li>
             </ol>
 
@@ -1048,7 +1055,7 @@ ACCOUNT | game=GAMEID | username=USERNAME | password=PASSWORD | status=STATUS
                     <tr>
                         <td>Create Game</td>
                         <td>MANAGE_GAMES topic</td>
-                        <td>Post <code>GAME | id=X | name=Y | status=ACTIVE</code></td>
+                        <td>Post <code>GAME | id=X | name=Y | status=ACTIVE | download_url=https://...</code></td>
                     </tr>
                     <tr>
                         <td>Enable/Disable Game</td>
@@ -1063,7 +1070,7 @@ ACCOUNT | game=GAMEID | username=USERNAME | password=PASSWORD | status=STATUS
                     <tr>
                         <td>Set Payment QR</td>
                         <td>PAYMENT_CONFIG topic</td>
-                        <td>Upload image with caption <code>PAYMENT_QR | game=X</code></td>
+                        <td>Upload image with caption <code>PAYMENT_QR | game=X | method=MethodName | tag=Optional</code></td>
                     </tr>
                     <tr>
                         <td>Approve Load</td>
@@ -1131,7 +1138,7 @@ ACCOUNT | game=GAMEID | username=USERNAME | password=PASSWORD | status=STATUS
             <h3>Payment QR Not Showing to User</h3>
             <ul>
                 <li><strong>Cause:</strong> No PAYMENT_QR configured for that game</li>
-                <li><strong>Fix:</strong> Go to PAYMENT_CONFIG topic, upload QR with <code>PAYMENT_QR | game=X</code> caption</li>
+                <li><strong>Fix:</strong> Go to PAYMENT_CONFIG topic, upload QR with <code>PAYMENT_QR | game=X | method=MethodName</code> (optional <code>tag=...</code> will be shown to users)</li>
             </ul>
             
             <h3>Approval Messages Not Appearing</h3>

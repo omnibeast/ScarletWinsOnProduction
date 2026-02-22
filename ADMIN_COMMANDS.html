@@ -262,6 +262,7 @@
             <div class="toc">
                 <h3>📋 Quick Navigation</h3>
                 <ul>
+                    <li><a href="#manage-games">Manage Games</a></li>
                     <li><a href="#account-inventory">Account Inventory Management</a></li>
                     <li><a href="#payment-config">Payment Configuration</a></li>
                     <li><a href="#approvals">Approval Controls</a></li>
@@ -269,6 +270,37 @@
                     <li><a href="#messages">Direct User Messages</a></li>
                     <li><a href="#support">Support Tickets</a></li>
                 </ul>
+            </div>
+
+            <!-- SECTION 0: Manage Games -->
+            <div class="command-section" id="manage-games">
+                <div class="section-title">🎮 Manage Games</div>
+
+                <div class="command-card">
+                    <div class="topic-label">MANAGE_GAMES Topic</div>
+                    <div class="command-name">Create / Update Game (with Download Link)</div>
+                    <div class="command-description">
+                        Create a new game or update existing game settings, including optional download link shown to users.
+                    </div>
+                    <div class="usage-block">
+                        <div class="usage-label">Format:</div>
+                        GAME | id=GameA | name=Game A | status=ACTIVE | download_url=https://example.com/gamea.apk
+                    </div>
+                    <div class="example">
+                        <strong>Examples:</strong><br/>
+                        <code>GAME | id=GameB | name=Game B | status=ACTIVE | download_url=https://example.com/gameb</code><br/>
+                        <code>GAME | id=GameC | name=Game C | status=DISABLED</code>
+                    </div>
+                    <div class="notes">
+                        <strong>Notes:</strong>
+                        <ul style="margin-left: 20px; margin-top: 8px;">
+                            <li><code>download_url</code> is optional but recommended for ACTIVE games</li>
+                            <li>Only <code>http://</code> or <code>https://</code> links are accepted</li>
+                            <li>Users see current game link at top of main menu and via <code>📥 Download Game</code> option</li>
+                            <li>Enable/Disable/Archive buttons keep the existing download link</li>
+                        </ul>
+                    </div>
+                </div>
             </div>
             
             <!-- SECTION 1: Account Inventory -->
@@ -326,19 +358,20 @@
                     </div>
                     <div class="usage-block">
                         <div class="usage-label">Format:</div>
-                        PAYMENT_QR | game=GameA | method=CashApp
+                        PAYMENT_QR | game=GameA | method=CashApp | tag=Optional text
                     </div>
                     <div class="example">
                         <strong>Example:</strong><br/>
                         Upload a photo/document with caption: <code>PAYMENT_QR | game=GameA | method=CashApp</code><br/>
-                        Or: <code>PAYMENT_QR | game=GameB | method=Zelle</code>
+                        Or: <code>PAYMENT_QR | game=GameB | method=Zelle | tag=Send $ to Zelle ID</code>
                     </div>
                     <div class="notes">
                         <strong>Notes:</strong> 
                         <ul style="margin-left: 20px; margin-top: 8px;">
                             <li>Must attach a photo or document to the message</li>
-                            <li>Each game+method combination can have its own QR</li>
+                            <li>Each game+method combination can have its own QR (key = <code>game::method</code>)</li>
                             <li>Re-uploading with the same game+method will replace the previous QR</li>
+                            <li><strong>tag</strong> is optional and will be shown to users under the QR (e.g., instructions or recipient name)</li>
                             <li>Common methods: CashApp, Zelle, Chime, Venmo, etc.</li>
                         </ul>
                     </div>
@@ -572,6 +605,11 @@
                     </thead>
                     <tbody>
                         <tr>
+                            <td>MANAGE_GAMES</td>
+                            <td><code>GAME | id=... | name=... | status=... | download_url=https://...</code></td>
+                            <td>Create/update game and optional download link</td>
+                        </tr>
+                        <tr>
                             <td>ACCOUNT_INVENTORY</td>
                             <td><code>ACCOUNT | game=... | username=... | password=... | status=AVAILABLE</code></td>
                             <td>Add account to available pool</td>
@@ -583,7 +621,7 @@
                         </tr>
                         <tr>
                             <td>PAYMENT_CONFIG</td>
-                            <td><code>PAYMENT_QR | game=... | method=...</code> (with photo/document)</td>
+                            <td><code>PAYMENT_QR | game=... | method=... | tag=...</code> (with photo/document; tag optional)</td>
                             <td>Add/update payment QR</td>
                         </tr>
                         <tr>

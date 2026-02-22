@@ -84,7 +84,7 @@ The admin supergroup must have **Forum Topics enabled**. Each topic acts as a da
 
 #### 🎮 MANAGE_GAMES (Topic ID: 20)
 - **Purpose:** Game configuration and status
-- **Format:** `GAME | id=GameA | name=Game A | status=ACTIVE`
+- **Format:** `GAME | id=GameA | name=Game A | status=ACTIVE | download_url=https://example.com/gamea.apk`
 - **Contains:** Bot-sent messages with game info and control buttons
 
 #### 📦 ACCOUNT_INVENTORY (Topic ID: 4)
@@ -141,9 +141,12 @@ When a user sends `/start` in a private chat:
 |--------|-------------|--------------|
 | 🧾 Register Account | Get assigned a game account from inventory | Email must be provided first (if new user) |
 | 👤 View My Account | Display assigned username & password | Account must be assigned to user |
+| 📥 Download Game | Show selected game's download link and open-link button | Selected game should have `download_url` configured |
 | 🟦 Load Balance | Submit load request with payment proof | Account assigned; payment QR configured |
 | 🟩 Cashout | Request withdrawal with receiving QR | Account assigned; sufficient balance |
 | 🎮 Change Game | Switch to a different active game | Must be ACTIVE status |
+
+Main menu also shows the currently selected game's download link at the top (or `Not set` if not configured).
 
 ### Load Balance Flow (ONE MESSAGE ONLY)
 
@@ -259,7 +262,7 @@ To add a new game:
 1. Go to **MANAGE_GAMES** topic
 2. Post a message with format:
    ```
-   GAME | id=GameD | name=Game D | status=ACTIVE
+   GAME | id=GameD | name=Game D | status=ACTIVE | download_url=https://example.com/gamed.apk
    ```
 3. Bot ingests it and creates canonical bot-sent record
 4. Control buttons appear for admins (Enable/Disable/Archive)
@@ -280,12 +283,13 @@ Use inline buttons in MANAGE_GAMES topic:
 
 When creating/updating games, use this exact format:
 ```
-GAME | id=GAMEID | name=Game Name | status=STATUS
+GAME | id=GAMEID | name=Game Name | status=STATUS | download_url=https://example.com/app.apk
 ```
 
 - `id`: Unique identifier (no spaces, alphanumeric + underscore)
 - `name`: Display name for users
 - `status`: One of ACTIVE, DISABLED, ARCHIVED
+- `download_url`: Optional HTTP/HTTPS download link shown in main menu and Download Game option
 
 ---
 
@@ -379,9 +383,9 @@ View ACCOUNT_INVENTORY topic to see:
 Payment QR codes are configured per game in the PAYMENT_CONFIG topic:
 
 1. Navigate to **PAYMENT_CONFIG** topic
-2. Upload photo or document with caption:
+2. Upload photo or document with caption (specify payment method; optional `tag` can be added):
    ```
-   PAYMENT_QR | game=GameA
+   PAYMENT_QR | game=GameA | method=CashApp | tag=Optional text
    ```
 3. Bot stores this as canonical payment QR for GameA
 4. When users load balance, bot displays this QR in their flow
@@ -390,7 +394,7 @@ Payment QR codes are configured per game in the PAYMENT_CONFIG topic:
 
 To change a game's payment QR:
 1. Go to PAYMENT_CONFIG topic
-2. Upload the new QR image/document with caption `PAYMENT_QR | game=GameA`
+2. Upload the new QR image/document with caption, e.g. `PAYMENT_QR | game=GameA | method=CashApp | tag=Optional`
 3. Bot automatically replaces the old QR with the new one
 
 ### Supported Formats
@@ -462,10 +466,10 @@ If users block the bot:
 
 | Task | Location | Action |
 |------|----------|--------|
-| Create Game | MANAGE_GAMES topic | Post `GAME \| id=X \| name=Y \| status=ACTIVE` |
+| Create Game | MANAGE_GAMES topic | Post `GAME \| id=X \| name=Y \| status=ACTIVE \| download_url=https://...` |
 | Enable/Disable Game | MANAGE_GAMES topic | Click game control button |
 | Add Accounts | ACCOUNT_INVENTORY topic | Post `ACCOUNT \| game=X \| username=Y \| password=Z \| status=AVAILABLE` |
-| Set Payment QR | PAYMENT_CONFIG topic | Upload image with caption `PAYMENT_QR \| game=X` |
+| Set Payment QR | PAYMENT_CONFIG topic | Upload image with caption `PAYMENT_QR \| game=X \| method=MethodName \| tag=Optional` |
 | Approve Load | LOAD_APPROVALS topic | Click ✅ Approve button |
 | Reject Load | LOAD_APPROVALS topic | Click ❌ Reject, then send reason message |
 | Approve Cashout | WITHDRAW_APPROVALS topic | Click ✅ Approve button |
@@ -496,7 +500,7 @@ If users block the bot:
 ### Payment QR Not Showing to User
 
 - **Cause:** No PAYMENT_QR configured for that game
-- **Fix:** Go to PAYMENT_CONFIG topic, upload QR with `PAYMENT_QR | game=X` caption
+- **Fix:** Go to PAYMENT_CONFIG topic, upload QR with `PAYMENT_QR | game=X | method=MethodName` (include `tag=...` to show a small instruction under the QR)
 
 ### Approval Messages Not Appearing
 
